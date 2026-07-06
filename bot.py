@@ -35,7 +35,7 @@ LOCALIZATION = {
         'enter_fio': "Tizimdan ro'yxatdan o'tish uchun *F.I.Sh. (Familiya Ism Sharifingizni)* kiriting:",
         'invalid_fio': "Iltimos, F.I.Sh.ni to'g'ri kiriting (kamida ism va familiya):",
         'reg_success': "Ro'yxatdan muvaffaqiyatli o'tdingiz! Sizning ma'lumotlaringiz: *{fio}*\n\nEndi tekshiruv boshlashingiz yoki statistikani ko'rishingiz mumkin.",
-        'welcome': "Xush kelibsiz, *{fio}*!\n\nBot bilan ishlash uchun quyidagi menyudan foydalaning.",
+        'welcome': "Salom, bu chek list bot. Botdan foydalanish uchun tugmalarni bosing.",
         'btn_new_check': "📝 Yangi tekshiruv",
         'btn_check_zone': "🔍 Zonani tekshirish",
         'btn_stats': "📊 Statistika",
@@ -81,7 +81,7 @@ LOCALIZATION = {
         'enter_fio': "Пожалуйста, введите ваше *ФИО (Фамилия Имя Отчество)* для регистрации:",
         'invalid_fio': "Пожалуйста, введите корректное ФИО (минимум имя и фамилия):",
         'reg_success': "Регистрация прошла успешно! Ваши данные: *{fio}*\n\nТеперь вы можете начать проверку или просмотреть статистику.",
-        'welcome': "Приветствуем, *{fio}*!\n\nИспользуйте меню ниже для работы с ботом.",
+        'welcome': "Привет, это чек-лист бот. Для использования бота нажмите кнопки.",
         'btn_new_check': "📝 Новая проверка",
         'btn_check_zone': "🔍 Проверить зону",
         'btn_stats': "📊 Статистика",
@@ -284,14 +284,23 @@ async def process_fio(message: types.Message, state: FSMContext):
     lang = data.get("lang", "ru")
     
     fio = message.text.strip()
-    if len(fio) < 5 or " " not in fio:
+    
+    invalid_inputs = [
+        "📝 Новая проверка", "📝 Yangi tekshiruv",
+        "🔍 Проверить зону", "🔍 Zonani tekshirish",
+        "📊 Статистика", "📊 Statistika",
+        "⚙️ Изменить ФИО", "⚙️ F.I.Sh. o'zgartirish",
+        "🌐 Изменить язык", "🌐 Tilni o'zgartirish"
+    ]
+    if len(fio) < 5 or " " not in fio or fio in invalid_inputs or fio.startswith("/"):
         await message.answer(LOCALIZATION[lang]['invalid_fio'])
         return
         
     database.register_user(message.from_user.id, fio, message.from_user.username, lang)
     await state.set_state(CheckStates.main_menu)
+    fio_esc = statistics.escape_markdown(fio)
     await message.answer(
-        LOCALIZATION[lang]['reg_success'].format(fio=fio),
+        LOCALIZATION[lang]['reg_success'].format(fio=fio_esc),
         parse_mode="Markdown",
         reply_markup=get_main_menu_keyboard(lang)
     )
@@ -389,9 +398,13 @@ async def process_query_zone_select(callback: types.CallbackQuery, state: FSMCon
         return
         
     # Construct summary message
-    summary = LOCALIZATION[lang]['latest_report_header'].format(zone=zone_name)
+    zone_esc = statistics.escape_markdown(zone_name)
+    summary = LOCALIZATION[lang]['latest_report_header'].format(zone=zone_esc)
     summary += LOCALIZATION[lang]['report_date'].format(date=report['created_at'])
-    inspector_display = f"{report['inspector']} (@{report['telegram_username']})" if report['telegram_username'] else report['inspector']
+    
+    inspector_esc = statistics.escape_markdown(report['inspector'])
+    username_esc = statistics.escape_markdown(report['telegram_username'])
+    inspector_display = f"{inspector_esc} (@{username_esc})" if report['telegram_username'] else inspector_esc
     summary += LOCALIZATION[lang]['report_by'].format(fio=inspector_display)
     
     status_text = LOCALIZATION[lang]['status_clean'] if report['status'] == 'Чисто' else LOCALIZATION[lang]['status_issues']
@@ -404,7 +417,8 @@ async def process_query_zone_select(callback: types.CallbackQuery, state: FSMCon
         if report['has_mess']:  summary += f"  - {LOCALIZATION[lang]['item_mess']}\n"
         
     if report['comment']:
-        summary += LOCALIZATION[lang]['report_comment_header'].format(comment=report['comment'])
+        comment_esc = statistics.escape_markdown(report['comment'])
+        summary += LOCALIZATION[lang]['report_comment_header'].format(comment=comment_esc)
         
     photos = report['photos']
     if photos:
@@ -639,12 +653,15 @@ async def process_comment(message: types.Message, state: FSMContext):
     # Get user FIO
     user = database.get_user(message.from_user.id)
     fio = user["fio"] if user else "Неизвестный"
+    fio_esc = statistics.escape_markdown(fio)
     if user and user.get("username"):
-        fio = f"{fio} (@{user['username']})"
+        username_esc = statistics.escape_markdown(user['username'])
+        fio_esc = f"{fio_esc} (@{username_esc})"
     
     # Construct summary message
     status_text = LOCALIZATION[lang]['status_clean'] if status == 'Чисто' else LOCALIZATION[lang]['status_issues']
-    summary = LOCALIZATION[lang]['report_saved'].format(report_id=report_id, zone=zone, fio=fio, status=status_text)
+    zone_esc = statistics.escape_markdown(zone)
+    summary = LOCALIZATION[lang]['report_saved'].format(report_id=report_id, zone=zone_esc, fio=fio_esc, status=status_text)
     
     if status != "Чисто":
         summary += LOCALIZATION[lang]['report_issues_header']
@@ -653,7 +670,8 @@ async def process_comment(message: types.Message, state: FSMContext):
         if mess:  summary += f"  - {LOCALIZATION[lang]['item_mess']}\n"
         
     if comment:
-        summary += LOCALIZATION[lang]['report_comment_header'].format(comment=comment)
+        comment_esc = statistics.escape_markdown(comment)
+        summary += LOCALIZATION[lang]['report_comment_header'].format(comment=comment_esc)
     if photos:
         summary += LOCALIZATION[lang]['report_photos_header'].format(count=len(photos))
         

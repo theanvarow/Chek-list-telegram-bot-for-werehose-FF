@@ -3,6 +3,15 @@ import pandas as pd
 from datetime import datetime
 import database
 
+def escape_markdown(text: str) -> str:
+    if not text:
+        return ""
+    escaped = str(text)
+    escaped = escaped.replace("\\", "\\\\")
+    for char in ['_', '*', '[', '`']:
+        escaped = escaped.replace(char, f"\\{char}")
+    return escaped
+
 def generate_text_stats(lang: str = "ru") -> str:
     user_stats = database.get_stats_by_user()
     recent_checks = database.get_recent_reports(10)
@@ -16,10 +25,13 @@ def generate_text_stats(lang: str = "ru") -> str:
         else:
             for item in recent_checks:
                 time_formatted = item['created_at'][5:16] # e.g. "07-05 13:45"
-                user_display = f"{item['inspector']} (@{item['telegram_username']})" if item['telegram_username'] else item['inspector']
+                inspector_esc = escape_markdown(item['inspector'])
+                username_esc = escape_markdown(item['telegram_username'])
+                user_display = f"{inspector_esc} (@{username_esc})" if item['telegram_username'] else inspector_esc
                 status_icon = "✅" if item['status'] == "Чисто" else "⚠️"
                 
-                text += f"📍 *{item['zone']}*\n"
+                zone_esc = escape_markdown(item['zone'])
+                text += f"📍 *{zone_esc}*\n"
                 text += f"└ 👤 {user_display} | 📅 {time_formatted}\n"
                 
                 status_lbl = "Toza" if item['status'] == "Чисто" else "Kamchiliklar bor"
@@ -33,7 +45,8 @@ def generate_text_stats(lang: str = "ru") -> str:
                     text += f"   └ Kamchiliklar: _{', '.join(issues)}_\n"
                     
                 if item['comment']:
-                    text += f"   └ Izoh: _{item['comment']}_\n"
+                    comment_esc = escape_markdown(item['comment'])
+                    text += f"   └ Izoh: _{comment_esc}_\n"
                 text += "\n"
                 
         text += "👤 *TOP xodimlar (tekshiruvlar soni):*\n"
@@ -41,7 +54,9 @@ def generate_text_stats(lang: str = "ru") -> str:
             text += "Ma'lumotlar yo'q\n"
         else:
             for idx, (fio, username, total, issues) in enumerate(user_stats[:5], 1):
-                user_display = f"{fio} (@{username})" if username else fio
+                fio_esc = escape_markdown(fio)
+                username_esc = escape_markdown(username)
+                user_display = f"{fio_esc} (@{username_esc})" if username else fio_esc
                 text += f"{idx}. {user_display}: *{total}* ta (kamchiliklar: {issues})\n"
                 
     else:
@@ -53,10 +68,13 @@ def generate_text_stats(lang: str = "ru") -> str:
         else:
             for item in recent_checks:
                 time_formatted = item['created_at'][5:16] # e.g. "07-05 13:45"
-                user_display = f"{item['inspector']} (@{item['telegram_username']})" if item['telegram_username'] else item['inspector']
+                inspector_esc = escape_markdown(item['inspector'])
+                username_esc = escape_markdown(item['telegram_username'])
+                user_display = f"{inspector_esc} (@{username_esc})" if item['telegram_username'] else inspector_esc
                 status_icon = "✅" if item['status'] == "Чисто" else "⚠️"
                 
-                text += f"📍 *{item['zone']}*\n"
+                zone_esc = escape_markdown(item['zone'])
+                text += f"📍 *{zone_esc}*\n"
                 text += f"└ 👤 {user_display} | 📅 {time_formatted}\n"
                 
                 status_lbl = "Чисто" if item['status'] == "Чисто" else "Есть замечания"
@@ -70,7 +88,8 @@ def generate_text_stats(lang: str = "ru") -> str:
                     text += f"   └ Замечания: _{', '.join(issues)}_\n"
                     
                 if item['comment']:
-                    text += f"   └ Коммент: _{item['comment']}_\n"
+                    comment_esc = escape_markdown(item['comment'])
+                    text += f"   └ Коммент: _{comment_esc}_\n"
                 text += "\n"
                 
         text += "👤 *ТОП сотрудников по проверкам:*\n"
@@ -78,7 +97,9 @@ def generate_text_stats(lang: str = "ru") -> str:
             text += "Нет данных\n"
         else:
             for idx, (fio, username, total, issues) in enumerate(user_stats[:5], 1):
-                user_display = f"{fio} (@{username})" if username else fio
+                fio_esc = escape_markdown(fio)
+                username_esc = escape_markdown(username)
+                user_display = f"{fio_esc} (@{username_esc})" if username else fio_esc
                 text += f"{idx}. {user_display}: *{total}* (с замечаниями: {issues})\n"
                 
     return text

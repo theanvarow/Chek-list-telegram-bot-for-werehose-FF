@@ -162,14 +162,16 @@ def save_report(
 def get_stats_by_user():
     conn = get_connection()
     cursor = conn.cursor()
+    today_str = datetime.now().strftime("%Y-%m-%d") + " 00:00:00"
     cursor.execute("""
         SELECT u.fio, u.username, COUNT(r.id) as total_checks,
                SUM(CASE WHEN r.status = 'Есть замечания' THEN 1 ELSE 0 END) as with_issues
         FROM users u
-        LEFT JOIN reports r ON u.user_id = r.user_id
+        LEFT JOIN reports r ON u.user_id = r.user_id AND r.created_at >= ?
         GROUP BY u.user_id, u.fio, u.username
+        HAVING total_checks > 0
         ORDER BY total_checks DESC
-    """)
+    """, (today_str,))
     rows = cursor.fetchall()
     conn.close()
     return rows
@@ -193,6 +195,7 @@ def get_stats_by_zone():
 def get_all_reports_for_export():
     conn = get_connection()
     cursor = conn.cursor()
+    today_str = datetime.now().strftime("%Y-%m-%d") + " 00:00:00"
     cursor.execute("""
         SELECT 
             r.id,
@@ -208,8 +211,9 @@ def get_all_reports_for_export():
             (SELECT GROUP_CONCAT(photo_path, '; ') FROM report_photos WHERE report_id = r.id) as photo_paths
         FROM reports r
         JOIN users u ON r.user_id = u.user_id
+        WHERE r.created_at >= ?
         ORDER BY r.created_at DESC
-    """)
+    """, (today_str,))
     rows = cursor.fetchall()
     columns = [
         "ID отчета", "Дата и время", "Проверяющий (ФИО)", "Telegram username", "Зона / Этаж", 
@@ -223,6 +227,7 @@ def get_all_reports_for_export():
 def get_latest_report_for_zone(zone_name: str):
     conn = get_connection()
     cursor = conn.cursor()
+    today_str = datetime.now().strftime("%Y-%m-%d") + " 00:00:00"
     cursor.execute("""
         SELECT 
             r.id,
@@ -236,10 +241,10 @@ def get_latest_report_for_zone(zone_name: str):
             r.comment
         FROM reports r
         JOIN users u ON r.user_id = u.user_id
-        WHERE r.zone = ?
+        WHERE r.zone = ? AND r.created_at >= ?
         ORDER BY r.created_at DESC
         LIMIT 1
-    """, (zone_name,))
+    """, (zone_name, today_str))
     report_row = cursor.fetchone()
     
     if not report_row:
@@ -284,6 +289,7 @@ def get_checked_zones_today() -> list:
 def get_recent_reports(limit: int = 10) -> list:
     conn = get_connection()
     cursor = conn.cursor()
+    today_str = datetime.now().strftime("%Y-%m-%d") + " 00:00:00"
     cursor.execute("""
         SELECT 
             r.id,
@@ -298,9 +304,10 @@ def get_recent_reports(limit: int = 10) -> list:
             r.comment
         FROM reports r
         JOIN users u ON r.user_id = u.user_id
+        WHERE r.created_at >= ?
         ORDER BY r.created_at DESC
         LIMIT ?
-    """, (limit,))
+    """, (today_str, limit))
     rows = cursor.fetchall()
     conn.close()
     
