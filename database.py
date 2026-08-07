@@ -3,7 +3,11 @@ from datetime import datetime
 from config import DB_NAME
 
 def get_connection():
-    return sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_NAME, timeout=15)
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
+    conn.execute("PRAGMA cache_size=-64000;")  # 64MB memory cache
+    return conn
 
 def init_db():
     conn = get_connection()
@@ -62,6 +66,12 @@ def init_db():
         )
     """)
     
+    # Create performance indexes
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_reports_created_at ON reports(created_at)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_reports_zone_created ON reports(zone, created_at)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_reports_user_id ON reports(user_id)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_photos_report_id ON report_photos(report_id)")
+    
     conn.commit()
     conn.close()
 
@@ -85,6 +95,14 @@ def get_user(user_id: int):
     if row:
         return {"user_id": row[0], "fio": row[1], "username": row[2], "lang": row[3], "created_at": row[4]}
     return None
+
+def get_all_users() -> list:
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_id, fio, username, lang, created_at FROM users")
+    rows = cursor.fetchall()
+    conn.close()
+    return [{"user_id": r[0], "fio": r[1], "username": r[2], "lang": r[3], "created_at": r[4]} for r in rows]
 
 
 def update_user_lang(user_id: int, lang: str):
@@ -159,19 +177,32 @@ def save_report(
     conn.close()
     return report_id
 
-def get_stats_by_user():
+def get_stats_by_user(date_from: str = None, date_to: str = None):
     conn = get_connection()
     cursor = conn.cursor()
-    today_str = datetime.now().strftime("%Y-%m-%d") + " 00:00:00"
-    cursor.execute("""
-        SELECT u.fio, u.username, COUNT(r.id) as total_checks,
-               SUM(CASE WHEN r.status = 'Есть замечания' THEN 1 ELSE 0 END) as with_issues
-        FROM users u
-        LEFT JOIN reports r ON u.user_id = r.user_id AND r.created_at >= ?
-        GROUP BY u.user_id, u.fio, u.username
-        HAVING total_checks > 0
-        ORDER BY total_checks DESC
-    """, (today_str,))
+    if not date_from:
+        date_from = datetime.now().strftime("%Y-%m-%d") + " 00:00:00"
+    
+    if date_to:
+        cursor.execute("""
+            SELECT u.fio, u.username, COUNT(r.id) as total_checks,
+                   SUM(CASE WHEN r.status = 'Есть замечания' THEN 1 ELSE 0 END) as with_issues
+            FROM users u
+            LEFT JOIN reports r ON u.user_id = r.user_id AND r.created_at >= ? AND r.created_at <= ?
+            GROUP BY u.user_id, u.fio, u.username
+            HAVING total_checks > 0
+            ORDER BY total_checks DESC
+        """, (date_from, date_to))
+    else:
+        cursor.execute("""
+            SELECT u.fio, u.username, COUNT(r.id) as total_checks,
+                   SUM(CASE WHEN r.status = 'Есть замечания' THEN 1 ELSE 0 END) as with_issues
+            FROM users u
+            LEFT JOIN reports r ON u.user_id = r.user_id AND r.created_at >= ?
+            GROUP BY u.user_id, u.fio, u.username
+            HAVING total_checks > 0
+            ORDER BY total_checks DESC
+        """, (date_from,))
     rows = cursor.fetchall()
     conn.close()
     return rows
@@ -192,11 +223,13 @@ def get_stats_by_zone():
     conn.close()
     return rows
 
-def get_all_reports_for_export():
+def get_all_reports_for_export(date_from: str = None, date_to: str = None):
     conn = get_connection()
     cursor = conn.cursor()
-    today_str = datetime.now().strftime("%Y-%m-%d") + " 00:00:00"
-    cursor.execute("""
+    if not date_from:
+        date_from = datetime.now().strftime("%Y-%m-%d") + " 00:00:00"
+        
+    query = """
         SELECT 
             r.id,
             r.created_at,
@@ -212,8 +245,14 @@ def get_all_reports_for_export():
         FROM reports r
         JOIN users u ON r.user_id = u.user_id
         WHERE r.created_at >= ?
-        ORDER BY r.created_at DESC
-    """, (today_str,))
+    """
+    params = [date_from]
+    if date_to:
+        query += " AND r.created_at <= ?"
+        params.append(date_to)
+        
+    query += " ORDER BY r.created_at DESC"
+    cursor.execute(query, tuple(params))
     rows = cursor.fetchall()
     columns = [
         "ID отчета", "Дата и время", "Проверяющий (ФИО)", "Telegram username", "Зона / Этаж", 
@@ -224,27 +263,46 @@ def get_all_reports_for_export():
     return rows, columns
 
 
-def get_latest_report_for_zone(zone_name: str):
+def get_latest_report_for_zone(zone_name: str, today_only: bool = True):
     conn = get_connection()
     cursor = conn.cursor()
-    today_str = datetime.now().strftime("%Y-%m-%d") + " 00:00:00"
-    cursor.execute("""
-        SELECT 
-            r.id,
-            r.created_at,
-            u.fio as inspector,
-            u.username as telegram_username,
-            r.status,
-            r.has_empty_boxes,
-            r.has_goods_on_floor,
-            r.has_mess,
-            r.comment
-        FROM reports r
-        JOIN users u ON r.user_id = u.user_id
-        WHERE r.zone = ? AND r.created_at >= ?
-        ORDER BY r.created_at DESC
-        LIMIT 1
-    """, (zone_name, today_str))
+    if today_only:
+        today_start = datetime.now().strftime("%Y-%m-%d 00:00:00")
+        cursor.execute("""
+            SELECT 
+                r.id,
+                r.created_at,
+                u.fio as inspector,
+                u.username as telegram_username,
+                r.status,
+                r.has_empty_boxes,
+                r.has_goods_on_floor,
+                r.has_mess,
+                r.comment
+            FROM reports r
+            JOIN users u ON r.user_id = u.user_id
+            WHERE r.zone = ? AND r.created_at >= ?
+            ORDER BY r.created_at DESC
+            LIMIT 1
+        """, (zone_name, today_start))
+    else:
+        cursor.execute("""
+            SELECT 
+                r.id,
+                r.created_at,
+                u.fio as inspector,
+                u.username as telegram_username,
+                r.status,
+                r.has_empty_boxes,
+                r.has_goods_on_floor,
+                r.has_mess,
+                r.comment
+            FROM reports r
+            JOIN users u ON r.user_id = u.user_id
+            WHERE r.zone = ?
+            ORDER BY r.created_at DESC
+            LIMIT 1
+        """, (zone_name,))
     report_row = cursor.fetchone()
     
     if not report_row:
@@ -286,11 +344,73 @@ def get_checked_zones_today() -> list:
     conn.close()
     return [row[0] for row in rows]
 
-def get_recent_reports(limit: int = 10) -> list:
+def get_zone_statuses_today() -> dict:
     conn = get_connection()
     cursor = conn.cursor()
     today_str = datetime.now().strftime("%Y-%m-%d") + " 00:00:00"
     cursor.execute("""
+        SELECT zone, status
+        FROM reports
+        WHERE created_at >= ?
+        ORDER BY created_at ASC
+    """, (today_str,))
+    rows = cursor.fetchall()
+    conn.close()
+    
+    zone_statuses = {}
+    for zone, status in rows:
+        zone_statuses[zone] = status
+    return zone_statuses
+
+def get_zone_statuses_for_user(user_id: int, hours: int = 3) -> dict:
+    from datetime import timedelta
+    conn = get_connection()
+    cursor = conn.cursor()
+    cutoff_str = (datetime.now() - timedelta(hours=hours)).strftime("%Y-%m-%d %H:%M:%S")
+    cursor.execute("""
+        SELECT zone, status
+        FROM reports
+        WHERE user_id = ? AND created_at >= ?
+        ORDER BY created_at ASC
+    """, (user_id, cutoff_str))
+    rows = cursor.fetchall()
+    conn.close()
+    
+    zone_statuses = {}
+    for zone, status in rows:
+        zone_statuses[zone] = status
+    return zone_statuses
+
+def get_photos_for_date_range(date_from: str, date_to: str = None) -> list:
+    conn = get_connection()
+    cursor = conn.cursor()
+    if date_to:
+        cursor.execute("""
+            SELECT rp.telegram_file_id, r.zone, r.status
+            FROM report_photos rp
+            JOIN reports r ON rp.report_id = r.id
+            WHERE r.created_at >= ? AND r.created_at <= ?
+            ORDER BY r.created_at ASC
+        """, (date_from, date_to))
+    else:
+        cursor.execute("""
+            SELECT rp.telegram_file_id, r.zone, r.status
+            FROM report_photos rp
+            JOIN reports r ON rp.report_id = r.id
+            WHERE r.created_at >= ?
+            ORDER BY r.created_at ASC
+        """, (date_from,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [{"file_id": r[0], "zone": r[1], "status": r[2]} for r in rows]
+
+def get_recent_reports(limit: int = 10, date_from: str = None, date_to: str = None) -> list:
+    conn = get_connection()
+    cursor = conn.cursor()
+    if not date_from:
+        date_from = datetime.now().strftime("%Y-%m-%d") + " 00:00:00"
+        
+    query = """
         SELECT 
             r.id,
             r.created_at,
@@ -305,9 +425,16 @@ def get_recent_reports(limit: int = 10) -> list:
         FROM reports r
         JOIN users u ON r.user_id = u.user_id
         WHERE r.created_at >= ?
-        ORDER BY r.created_at DESC
-        LIMIT ?
-    """, (today_str, limit))
+    """
+    params = [date_from]
+    if date_to:
+        query += " AND r.created_at <= ?"
+        params.append(date_to)
+        
+    query += " ORDER BY r.created_at DESC LIMIT ?"
+    params.append(limit)
+    
+    cursor.execute(query, tuple(params))
     rows = cursor.fetchall()
     conn.close()
     
@@ -325,6 +452,62 @@ def get_recent_reports(limit: int = 10) -> list:
             "has_mess": bool(row[8]),
             "comment": row[9]
         })
+    return reports
+
+
+def get_reports_for_summary(date_from: str = None, date_to: str = None):
+    conn = get_connection()
+    cursor = conn.cursor()
+    if not date_from:
+        date_from = datetime.now().strftime("%Y-%m-%d") + " 00:00:00"
+        
+    query = """
+        SELECT 
+            r.id,
+            r.created_at,
+            u.fio as inspector,
+            u.username as telegram_username,
+            r.zone,
+            r.status,
+            r.has_empty_boxes,
+            r.has_goods_on_floor,
+            r.has_mess,
+            r.comment
+        FROM reports r
+        JOIN users u ON r.user_id = u.user_id
+        WHERE r.created_at >= ?
+    """
+    params = [date_from]
+    if date_to:
+        query += " AND r.created_at <= ?"
+        params.append(date_to)
+        
+    query += " ORDER BY r.created_at ASC"
+    cursor.execute(query, tuple(params))
+    rows = cursor.fetchall()
+    
+    reports = []
+    for row in rows:
+        report_id = row[0]
+        cursor.execute("SELECT telegram_file_id FROM report_photos WHERE report_id = ?", (report_id,))
+        p_rows = cursor.fetchall()
+        photos = [pr[0] for pr in p_rows if pr[0]]
+        
+        reports.append({
+            'id': row[0],
+            'created_at': row[1],
+            'inspector': row[2],
+            'telegram_username': row[3],
+            'zone': row[4],
+            'status': row[5],
+            'has_empty_boxes': bool(row[6]),
+            'has_goods_on_floor': bool(row[7]),
+            'has_mess': bool(row[8]),
+            'comment': row[9],
+            'photos': photos
+        })
+        
+    conn.close()
     return reports
 
 

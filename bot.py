@@ -1,8 +1,8 @@
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -66,8 +66,9 @@ LOCALIZATION = {
         'stats_menu_title': "Statistika hisoboti turini tanlang:",
         'btn_stats_text': "📝 Matn ko'rinishida",
         'btn_stats_excel': "📥 Excel yuklab olish",
-        'no_reports_zone': "📍 Zona: *{zone}*\n\nUshbu zona bo'yicha hali tekshiruv hisoboti saqlanmagan.",
-        'latest_report_header': "📋 *Zonaning oxirgi hisoboti: {zone}*\n\n",
+        'select_date_prompt': "📅 *Statistika ko'rish uchun sanani tanlang:*",
+        'no_reports_zone': "📍 Zona: *{zone}*\n\n🔒 Bugun bu zona hali tekshirilmadi.",
+        'latest_report_header': "📋 *Zonaning bugungi oxirgi hisoboti: {zone}*\n\n",
         'report_date': "📅 *Tekshiruv sanasi:* {date}\n",
         'report_by': "👤 *Tekshirdi:* {fio}\n",
         'loading_photos': "Hisobot rasmlari yuklanmoqda...",
@@ -81,11 +82,12 @@ LOCALIZATION = {
         'enter_fio': "Пожалуйста, введите ваше *ФИО (Фамилия Имя Отчество)* для регистрации:",
         'invalid_fio': "Пожалуйста, введите корректное ФИО (минимум имя и фамилия):",
         'reg_success': "Регистрация прошла успешно! Ваши данные: *{fio}*\n\nТеперь вы можете начать проверку или просмотреть статистику.",
-        'welcome': "Привет, это чек-лист бот. Для использования бота нажмите кнопки.",
+        'welcome': "Привет, *{fio}*! Это чек-лист бот. Для использования бота нажмите кнопки.",
         'btn_new_check': "📝 Новая проверка",
         'btn_check_zone': "🔍 Проверить зону",
         'btn_stats': "📊 Статистика",
         'btn_change_fio': "⚙️ Изменить ФИО",
+        'btn_finish': "🏁 Завершить обход",
         'btn_change_lang': "🌐 Изменить язык",
         'prompt_zone': "📍 Выберите зону / этаж для проверки:",
         'prompt_query_zone': "📍 Выберите зону / этаж для просмотра последнего отчета:",
@@ -112,8 +114,9 @@ LOCALIZATION = {
         'stats_menu_title': "Выберите тип отчета по статистике:",
         'btn_stats_text': "📝 Текстовый отчет",
         'btn_stats_excel': "📥 Скачать Excel",
-        'no_reports_zone': "📍 Зона: *{zone}*\n\nПо этой зоне пока нет сохраненных отчетов проверок.",
-        'latest_report_header': "📋 *Последний отчет по зоне: {zone}*\n\n",
+        'select_date_prompt': "📅 *Выберите дату для просмотра статистики:*",
+        'no_reports_zone': "📍 Зона: *{zone}*\n\n🔒 Сегодня эта зона ещё не проверялась.",
+        'latest_report_header': "📋 *Сегодняшний отчет по зоне: {zone}*\n\n",
         'report_date': "📅 *Дата проверки:* {date}\n",
         'report_by': "👤 *Проверил:* {fio}\n",
         'loading_photos': "Загружаю фотографии отчета...",
@@ -126,7 +129,6 @@ LOCALIZATION = {
 
 # Define conversation states
 class CheckStates(StatesGroup):
-    selecting_lang = State()
     waiting_for_fio = State()
     main_menu = State()
     selecting_zone = State()
@@ -136,44 +138,72 @@ class CheckStates(StatesGroup):
     writing_comment = State()
     querying_zone = State()
 
-# Keyboard Generators
-def get_lang_keyboard():
+def get_main_menu_keyboard(lang: str = "ru"):
     keyboard = [
-        [InlineKeyboardButton(text="🇺🇿 O'zbekcha", callback_data="lang:uz")],
-        [InlineKeyboardButton(text="🇷🇺 Русский", callback_data="lang:ru")]
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
-
-def get_main_menu_keyboard(lang: str):
-    keyboard = [
-        [KeyboardButton(text=LOCALIZATION[lang]['btn_new_check']), KeyboardButton(text=LOCALIZATION[lang]['btn_check_zone'])],
-        [KeyboardButton(text=LOCALIZATION[lang]['btn_stats']), KeyboardButton(text=LOCALIZATION[lang]['btn_change_fio'])],
-        [KeyboardButton(text=LOCALIZATION[lang]['btn_change_lang'])]
+        [KeyboardButton(text=LOCALIZATION['ru']['btn_new_check']), KeyboardButton(text=LOCALIZATION['ru']['btn_stats'])]
     ]
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
-def get_zone_keyboard(checked_zones: list = None):
-    if checked_zones is None:
-        checked_zones = []
+def get_date_selection_keyboard(lang: str = "ru"):
+    now = datetime.now()
+    d0 = now.date()
+    
+    keyboard = []
+    row = []
+    for i in range(7):
+        dt = d0 - timedelta(days=i)
+        dt_str = dt.strftime('%Y-%m-%d')
+        if i == 0:
+            lbl = f"📅 Сегодня ({dt.strftime('%d.%m')})"
+        elif i == 1:
+            lbl = f"📅 Вчера ({dt.strftime('%d.%m')})"
+        else:
+            lbl = f"📅 {dt.strftime('%d.%m.%Y')}"
+        
+        row.append(InlineKeyboardButton(text=lbl, callback_data=f"sdate:day:{dt_str}"))
+        if len(row) == 2:
+            keyboard.append(row)
+            row = []
+    if row:
+        keyboard.append(row)
+        
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def get_stats_actions_keyboard(lang: str = "ru", date_key: str = "today"):
+    date_info = statistics.get_date_info(date_key, "ru")
+    btn_excel = f"📥 Скачать Excel ({date_info['title']})"
+    btn_change_date = "📅 Выбрать другую дату"
+        
+    keyboard = [
+        [InlineKeyboardButton(text=btn_excel, callback_data=f"sexcel:{date_key}")],
+        [InlineKeyboardButton(text=btn_change_date, callback_data="sdate_select")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
+def get_zone_keyboard(zone_statuses: dict = None, prefix: str = "szone:"):
+    if zone_statuses is None:
+        zone_statuses = {}
     keyboard = []
     # Display in 2 columns
     for i in range(0, len(config.ZONES), 2):
         row = []
         
         zone1 = config.ZONES[i]
-        prefix1 = "✅ " if zone1 in checked_zones else ""
-        row.append(InlineKeyboardButton(text=f"{prefix1}{zone1}", callback_data=f"zone:{i}"))
+        status1 = zone_statuses.get(zone1)
+        prefix1 = "✅ " if status1 == "Чисто" else ("⚠️ " if status1 == "Есть замечания" else "🔒 ")
+        row.append(InlineKeyboardButton(text=f"{prefix1}{zone1}", callback_data=f"{prefix}{i}"))
         
         if i + 1 < len(config.ZONES):
             zone2 = config.ZONES[i+1]
-            prefix2 = "✅ " if zone2 in checked_zones else ""
-            row.append(InlineKeyboardButton(text=f"{prefix2}{zone2}", callback_data=f"zone:{i+1}"))
+            status2 = zone_statuses.get(zone2)
+            prefix2 = "✅ " if status2 == "Чисто" else ("⚠️ " if status2 == "Есть замечания" else "🔒 ")
+            row.append(InlineKeyboardButton(text=f"{prefix2}{zone2}", callback_data=f"{prefix}{i+1}"))
             
         keyboard.append(row)
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-
-def get_status_keyboard(lang: str):
+def get_status_keyboard(lang: str = "ru"):
     keyboard = [
         [InlineKeyboardButton(text=LOCALIZATION[lang]['btn_clean'], callback_data="status:clean")],
         [InlineKeyboardButton(text=LOCALIZATION[lang]['btn_issues'], callback_data="status:issues")]
@@ -195,9 +225,9 @@ def get_checklist_keyboard(lang: str, boxes: bool, floor: bool, mess: bool):
 
 def get_photo_keyboard(lang: str, photo_count: int):
     if photo_count > 0:
-        done_text = LOCALIZATION[lang]['btn_photo_done'].format(count=photo_count)
+        done_text = f"➡️ Готово ({photo_count} фото)" if lang == 'ru' else f"➡️ Tayyor ({photo_count} rasm)"
     else:
-        done_text = LOCALIZATION[lang]['btn_photo_done'].format(count="").replace(" ()", "").replace(" (0)", "")
+        done_text = "➡️ Готово" if lang == 'ru' else "➡️ Tayyor"
     
     keyboard = [
         [KeyboardButton(text=done_text)],
@@ -219,163 +249,118 @@ def get_stats_keyboard(lang: str):
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
-# START COMMAND & LANGUAGE FLOW
+# USER REGISTRATION HELPER (AUTO FROM TELEGRAM ACCOUNT)
+def ensure_user_registered(telegram_user: types.User) -> dict:
+    account_fio = telegram_user.full_name.strip() if telegram_user.full_name else (telegram_user.username or "Пользователь")
+    user = database.get_user(telegram_user.id)
+    if not user:
+        database.register_user(telegram_user.id, account_fio, telegram_user.username, 'ru')
+        user = database.get_user(telegram_user.id)
+    else:
+        if user.get('fio') != account_fio or user.get('username') != telegram_user.username:
+            database.register_user(telegram_user.id, account_fio, telegram_user.username, 'ru')
+            user['fio'] = account_fio
+            user['username'] = telegram_user.username
+    return user
+
+
+# RESTRICT ALL BOT COMMANDS/INTERACTIONS TO PRIVATE CHATS ONLY & WIPE GROUP KEYBOARDS
+async def delete_after_delay(msg: types.Message, delay: int):
+    await asyncio.sleep(delay)
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+
+@dp.message.outer_middleware()
+async def private_chat_only_message_middleware(handler, event: types.Message, data: dict):
+    if event.chat.type in ["group", "supergroup"]:
+        if event.text and (event.text.startswith("/") or any(kw in event.text.lower() for kw in ["проверка", "завершить", "статистика", "зона", "fio", "фио", "обход"])):
+            try:
+                msg = await event.answer(
+                    "⚠️ *Бот работает только в личных сообщениях с ботом.*",
+                    parse_mode="Markdown",
+                    reply_markup=ReplyKeyboardRemove()
+                )
+                asyncio.create_task(delete_after_delay(msg, 4))
+            except Exception:
+                pass
+        return
+    return await handler(event, data)
+
+@dp.callback_query.outer_middleware()
+async def private_chat_only_callback_middleware(handler, event: types.CallbackQuery, data: dict):
+    if event.message and event.message.chat.type in ["group", "supergroup"]:
+        return
+    return await handler(event, data)
+
+
+# START COMMAND
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message, state: FSMContext):
     await state.clear()
-    user = database.get_user(message.from_user.id)
-    if user:
-        # Dynamic self-healing for username updates
-        if message.from_user.username != user.get('username'):
-            database.update_user_username(message.from_user.id, message.from_user.username)
-            user['username'] = message.from_user.username
-            
-        lang = user['lang'] or 'ru'
-        await state.update_data(lang=lang)
-        await state.set_state(CheckStates.main_menu)
-        await message.answer(
-            LOCALIZATION[lang]['welcome'].format(fio=user['fio']),
-            parse_mode="Markdown",
-            reply_markup=get_main_menu_keyboard(lang)
-        )
-    else:
-        await state.set_state(CheckStates.selecting_lang)
-        await message.answer(
-            "Iltimos, tilni tanlang / Пожалуйста, выберите язык:",
-            reply_markup=get_lang_keyboard()
-        )
-
-@dp.callback_query(CheckStates.selecting_lang, F.data.startswith("lang:"))
-async def process_lang_select(callback: types.CallbackQuery, state: FSMContext):
-    lang = callback.data.split(":")[1]
+    user = ensure_user_registered(message.from_user)
+    lang = 'ru'
     await state.update_data(lang=lang)
-    
-    user = database.get_user(callback.from_user.id)
-    if user:
-        # Update existing user language and username
-        database.update_user_lang(callback.from_user.id, lang)
-        if callback.from_user.username != user.get('username'):
-            database.update_user_username(callback.from_user.id, callback.from_user.username)
-            user['username'] = callback.from_user.username
-            
-        await state.set_state(CheckStates.main_menu)
-        await callback.message.delete()
-        await callback.message.answer(
-            LOCALIZATION[lang]['welcome'].format(fio=user['fio']),
-            parse_mode="Markdown",
-            reply_markup=get_main_menu_keyboard(lang)
-        )
-    else:
-        # New registration: go to FIO state
-        await state.set_state(CheckStates.waiting_for_fio)
-        await callback.message.delete()
-        await callback.message.answer(
-            LOCALIZATION[lang]['enter_fio'],
-            parse_mode="Markdown",
-            reply_markup=ReplyKeyboardRemove()
-        )
-    await callback.answer()
-
-
-# REGISTRATION FLOW
-@dp.message(CheckStates.waiting_for_fio)
-async def process_fio(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    lang = data.get("lang", "ru")
-    
-    fio = message.text.strip()
-    
-    invalid_inputs = [
-        "📝 Новая проверка", "📝 Yangi tekshiruv",
-        "🔍 Проверить зону", "🔍 Zonani tekshirish",
-        "📊 Статистика", "📊 Statistika",
-        "⚙️ Изменить ФИО", "⚙️ F.I.Sh. o'zgartirish",
-        "🌐 Изменить язык", "🌐 Tilni o'zgartirish"
-    ]
-    if len(fio) < 5 or " " not in fio or fio in invalid_inputs or fio.startswith("/"):
-        await message.answer(LOCALIZATION[lang]['invalid_fio'])
-        return
-        
-    database.register_user(message.from_user.id, fio, message.from_user.username, lang)
     await state.set_state(CheckStates.main_menu)
-    fio_esc = statistics.escape_markdown(fio)
+    fio_esc = statistics.escape_markdown(user['fio'])
     await message.answer(
-        LOCALIZATION[lang]['reg_success'].format(fio=fio_esc),
+        LOCALIZATION[lang]['welcome'].format(fio=fio_esc),
         parse_mode="Markdown",
         reply_markup=get_main_menu_keyboard(lang)
     )
 
 
 # MAIN MENU COMMAND HANDLING
-@dp.message(lambda msg: msg.text in ["📝 Новая проверка", "📝 Yangi tekshiruv"])
+@dp.message(StateFilter("*"), F.text & (F.text.contains("Новая проверка") | F.text.contains("Yangi tekshiruv")))
 async def start_check(message: types.Message, state: FSMContext):
-    user = database.get_user(message.from_user.id)
-    if not user:
-        await state.set_state(CheckStates.selecting_lang)
-        await message.answer("Пожалуйста, выберите язык / Iltimos, tilni tanlang:", reply_markup=get_lang_keyboard())
-        return
-
-    # Update username if it changed
-    if message.from_user.username != user.get('username'):
-        database.update_user_username(message.from_user.id, message.from_user.username)
-
-    lang = user['lang'] or 'ru'
+    ensure_user_registered(message.from_user)
+    lang = 'ru'
     await state.update_data(lang=lang)
     await state.set_state(CheckStates.selecting_zone)
-    checked_today = database.get_checked_zones_today()
-    await message.answer(LOCALIZATION[lang]['prompt_zone'], reply_markup=get_zone_keyboard(checked_today))
+    zone_statuses = database.get_zone_statuses_for_user(message.from_user.id, hours=3)
+    await message.answer(LOCALIZATION[lang]['prompt_zone'], reply_markup=get_zone_keyboard(zone_statuses, prefix="szone:"))
 
-@dp.message(lambda msg: msg.text in ["🔍 Проверить зону", "🔍 Zonani tekshirish"])
+@dp.message(StateFilter("*"), F.text & (F.text.contains("Проверить зону") | F.text.contains("Zonani tekshirish") | F.text.contains("проверка зона")))
 async def start_query_zone(message: types.Message, state: FSMContext):
-    user = database.get_user(message.from_user.id)
-    if not user:
-        await state.set_state(CheckStates.selecting_lang)
-        await message.answer("Пожалуйста, выберите язык / Iltimos, tilni tanlang:", reply_markup=get_lang_keyboard())
-        return
-
-    # Update username if it changed
-    if message.from_user.username != user.get('username'):
-        database.update_user_username(message.from_user.id, message.from_user.username)
-
-    lang = user['lang'] or 'ru'
+    ensure_user_registered(message.from_user)
+    lang = 'ru'
     await state.update_data(lang=lang)
     await state.set_state(CheckStates.querying_zone)
-    checked_today = database.get_checked_zones_today()
-    await message.answer(LOCALIZATION[lang]['prompt_query_zone'], reply_markup=get_zone_keyboard(checked_today))
+    zone_statuses = database.get_zone_statuses_today()
+    await message.answer(LOCALIZATION[lang]['prompt_query_zone'], reply_markup=get_zone_keyboard(zone_statuses, prefix="qzone:"))
 
 
-
-@dp.message(lambda msg: msg.text in ["📊 Статистика", "📊 Statistika"])
+@dp.message(F.text.in_(["📊 Статистика", "📊 Statistika"]))
 async def show_stats_menu(message: types.Message, state: FSMContext):
-    lang = database.get_user_lang(message.from_user.id)
+    lang = 'ru'
     await state.update_data(lang=lang)
     await message.answer(
-        LOCALIZATION[lang]['stats_menu_title'],
-        reply_markup=get_stats_keyboard(lang)
-    )
-
-@dp.message(lambda msg: msg.text in ["⚙️ Изменить ФИО", "⚙️ F.I.Sh. o'zgartirish"])
-async def change_fio(message: types.Message, state: FSMContext):
-    lang = database.get_user_lang(message.from_user.id)
-    await state.update_data(lang=lang)
-    await state.set_state(CheckStates.waiting_for_fio)
-    await message.answer(
-        LOCALIZATION[lang]['enter_fio'],
+        LOCALIZATION[lang]['select_date_prompt'],
         parse_mode="Markdown",
-        reply_markup=ReplyKeyboardRemove()
+        reply_markup=get_date_selection_keyboard(lang)
     )
 
-@dp.message(lambda msg: msg.text in ["🌐 Изменить язык", "🌐 Tilni o'zgartirish"])
-async def change_lang(message: types.Message, state: FSMContext):
-    await state.set_state(CheckStates.selecting_lang)
-    await message.answer(
-        "Iltimos, tilni tanlang / Пожалуйста, выберите язык:",
-        reply_markup=get_lang_keyboard()
-    )
+
 
 
 # CHECKLIST STEP-BY-STEP FLOW
-@dp.callback_query(CheckStates.querying_zone, F.data.startswith("zone:"))
+@dp.callback_query(StateFilter("*"), F.data.startswith("szone:"))
+async def process_szone_select(callback: types.CallbackQuery, state: FSMContext):
+    await process_zone_select(callback, state)
+
+@dp.callback_query(StateFilter("*"), F.data.startswith("qzone:"))
+async def process_qzone_select(callback: types.CallbackQuery, state: FSMContext):
+    await process_query_zone_select(callback, state)
+
+@dp.callback_query(StateFilter("*"), F.data.startswith("zone:"))
+async def process_legacy_zone_select(callback: types.CallbackQuery, state: FSMContext):
+    current_state = await state.get_state()
+    if current_state == CheckStates.querying_zone.state:
+        await process_query_zone_select(callback, state)
+    else:
+        await process_zone_select(callback, state)
+
 async def process_query_zone_select(callback: types.CallbackQuery, state: FSMContext):
     zone_index = int(callback.data.split(":")[1])
     zone_name = config.ZONES[zone_index]
@@ -383,7 +368,11 @@ async def process_query_zone_select(callback: types.CallbackQuery, state: FSMCon
     data = await state.get_data()
     lang = data.get("lang", "ru")
     
-    await callback.message.delete()
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+        
     await state.set_state(CheckStates.main_menu)
     
     report = database.get_latest_report_for_zone(zone_name)
@@ -400,7 +389,13 @@ async def process_query_zone_select(callback: types.CallbackQuery, state: FSMCon
     # Construct summary message
     zone_esc = statistics.escape_markdown(zone_name)
     summary = LOCALIZATION[lang]['latest_report_header'].format(zone=zone_esc)
-    summary += LOCALIZATION[lang]['report_date'].format(date=report['created_at'])
+    raw_date = str(report['created_at'])
+    if " " in raw_date:
+        d_part, t_part = raw_date.split(" ", 1)
+        formatted_date = f"{d_part} - {t_part}"
+    else:
+        formatted_date = raw_date
+    summary += LOCALIZATION[lang]['report_date'].format(date=formatted_date)
     
     inspector_esc = statistics.escape_markdown(report['inspector'])
     username_esc = statistics.escape_markdown(report['telegram_username'])
@@ -408,13 +403,14 @@ async def process_query_zone_select(callback: types.CallbackQuery, state: FSMCon
     summary += LOCALIZATION[lang]['report_by'].format(fio=inspector_display)
     
     status_text = LOCALIZATION[lang]['status_clean'] if report['status'] == 'Чисто' else LOCALIZATION[lang]['status_issues']
-    summary += f"📊 *Holat / Состояние:* {status_text}\n"
+    summary += f"📊 *Состояние:* {status_text}\n"
     
     if report['status'] != "Чисто":
-        summary += LOCALIZATION[lang]['report_issues_header']
-        if report['has_empty_boxes']: summary += f"  - {LOCALIZATION[lang]['item_boxes']}\n"
-        if report['has_goods_on_floor']: summary += f"  - {LOCALIZATION[lang]['item_floor']}\n"
-        if report['has_mess']:  summary += f"  - {LOCALIZATION[lang]['item_mess']}\n"
+        issues_items = []
+        if report['has_empty_boxes']: issues_items.append(LOCALIZATION[lang]['item_boxes'])
+        if report['has_goods_on_floor']: issues_items.append(LOCALIZATION[lang]['item_floor'])
+        if report['has_mess']:  issues_items.append(LOCALIZATION[lang]['item_mess'])
+        summary += f"🔍 *Замечания:* {', '.join(issues_items)}\n"
         
     if report['comment']:
         comment_esc = statistics.escape_markdown(report['comment'])
@@ -456,7 +452,6 @@ async def process_query_zone_select(callback: types.CallbackQuery, state: FSMCon
         
     await callback.answer()
 
-@dp.callback_query(CheckStates.selecting_zone, F.data.startswith("zone:"))
 async def process_zone_select(callback: types.CallbackQuery, state: FSMContext):
     zone_index = int(callback.data.split(":")[1])
     zone_name = config.ZONES[zone_index]
@@ -467,14 +462,21 @@ async def process_zone_select(callback: types.CallbackQuery, state: FSMContext):
     await state.update_data(zone=zone_name)
     await state.set_state(CheckStates.selecting_status)
     
-    await callback.message.edit_text(
-        LOCALIZATION[lang]['prompt_status'].format(zone=zone_name),
-        parse_mode="Markdown",
-        reply_markup=get_status_keyboard(lang)
-    )
+    try:
+        await callback.message.edit_text(
+            LOCALIZATION[lang]['prompt_status'].format(zone=zone_name),
+            parse_mode="Markdown",
+            reply_markup=get_status_keyboard(lang)
+        )
+    except Exception:
+        await callback.message.answer(
+            LOCALIZATION[lang]['prompt_status'].format(zone=zone_name),
+            parse_mode="Markdown",
+            reply_markup=get_status_keyboard(lang)
+        )
     await callback.answer()
 
-@dp.callback_query(CheckStates.selecting_status, F.data.startswith("status:"))
+@dp.callback_query(StateFilter("*"), F.data.startswith("status:"))
 async def process_status_select(callback: types.CallbackQuery, state: FSMContext):
     status_type = callback.data.split(":")[1]
     data = await state.get_data()
@@ -491,7 +493,10 @@ async def process_status_select(callback: types.CallbackQuery, state: FSMContext
         await state.update_data(photos=[])
         await state.set_state(CheckStates.uploading_photos)
         
-        await callback.message.delete()
+        try:
+            await callback.message.delete()
+        except Exception:
+            pass
         await callback.message.answer(
             LOCALIZATION[lang]['prompt_photos_clean'],
             parse_mode="Markdown",
@@ -506,13 +511,19 @@ async def process_status_select(callback: types.CallbackQuery, state: FSMContext
             has_mess=False
         )
         await state.set_state(CheckStates.filling_checklist)
-        await callback.message.edit_text(
-            LOCALIZATION[lang]['prompt_checklist'],
-            reply_markup=get_checklist_keyboard(lang, False, False, False)
-        )
+        try:
+            await callback.message.edit_text(
+                LOCALIZATION[lang]['prompt_checklist'],
+                reply_markup=get_checklist_keyboard(lang, False, False, False)
+            )
+        except Exception:
+            await callback.message.answer(
+                LOCALIZATION[lang]['prompt_checklist'],
+                reply_markup=get_checklist_keyboard(lang, False, False, False)
+            )
     await callback.answer()
 
-@dp.callback_query(CheckStates.filling_checklist, F.data.startswith("toggle:"))
+@dp.callback_query(StateFilter("*"), F.data.startswith("toggle:"))
 async def process_checklist_toggle(callback: types.CallbackQuery, state: FSMContext):
     toggle_item = callback.data.split(":")[1]
     data = await state.get_data()
@@ -537,12 +548,15 @@ async def process_checklist_toggle(callback: types.CallbackQuery, state: FSMCont
     )
     
     # Update UI to reflect selected items
-    await callback.message.edit_reply_markup(
-        reply_markup=get_checklist_keyboard(lang, boxes, floor, mess)
-    )
+    try:
+        await callback.message.edit_reply_markup(
+            reply_markup=get_checklist_keyboard(lang, boxes, floor, mess)
+        )
+    except Exception:
+        pass
     await callback.answer()
 
-@dp.callback_query(CheckStates.filling_checklist, F.data == "checklist_done")
+@dp.callback_query(StateFilter("*"), F.data == "checklist_done")
 async def process_checklist_done(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
     lang = data.get("lang", "ru")
@@ -558,7 +572,10 @@ async def process_checklist_done(callback: types.CallbackQuery, state: FSMContex
     await state.update_data(photos=[])
     await state.set_state(CheckStates.uploading_photos)
     
-    await callback.message.delete()
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
     await callback.message.answer(
         LOCALIZATION[lang]['prompt_photos'],
         parse_mode="Markdown",
@@ -599,7 +616,7 @@ async def process_photo_upload(message: types.Message, state: FSMContext):
         err_msg = "⚠️ Rasmni yuklab bo'lmadi, qaytadan yuboring." if lang == "uz" else "⚠️ Не удалось загрузить фото. Пожалуйста, попробуйте еще раз."
         await message.answer(err_msg)
 
-@dp.message(CheckStates.uploading_photos, lambda msg: "➡️ Готово" in msg.text or "➡️ Tayyor" in msg.text)
+@dp.message(CheckStates.uploading_photos, F.text & (F.text.contains("Готово") | F.text.contains("Tayyor") | F.text.icontains("готово") | F.text.icontains("tayyor")))
 async def process_photos_done(message: types.Message, state: FSMContext):
     data = await state.get_data()
     lang = data.get("lang", "ru")
@@ -610,7 +627,7 @@ async def process_photos_done(message: types.Message, state: FSMContext):
         reply_markup=get_comment_keyboard(lang)
     )
 
-@dp.message(CheckStates.uploading_photos, lambda msg: msg.text in ["⏭️ Пропустить фото", "⏭️ Rasm yubormaslik"])
+@dp.message(CheckStates.uploading_photos, F.text & (F.text.contains("Пропустить") | F.text.contains("Rasm yubormaslik") | F.text.icontains("пропустить")))
 async def process_photos_skip(message: types.Message, state: FSMContext):
     data = await state.get_data()
     lang = data.get("lang", "ru")
@@ -621,6 +638,14 @@ async def process_photos_skip(message: types.Message, state: FSMContext):
         LOCALIZATION[lang]['prompt_comment'],
         reply_markup=get_comment_keyboard(lang)
     )
+
+@dp.message(CheckStates.uploading_photos, F.text)
+async def process_photos_unknown_text(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    lang = data.get("lang", "ru")
+    uploaded_photos = data.get("photos", [])
+    prompt_msg = "📸 Пожалуйста, отправьте фото и нажмите *'Готово'*, либо нажмите *'Пропустить фото'*."
+    await message.answer(prompt_msg, parse_mode="Markdown", reply_markup=get_photo_keyboard(lang, len(uploaded_photos)))
 
 @dp.message(CheckStates.writing_comment)
 async def process_comment(message: types.Message, state: FSMContext):
@@ -664,10 +689,11 @@ async def process_comment(message: types.Message, state: FSMContext):
     summary = LOCALIZATION[lang]['report_saved'].format(report_id=report_id, zone=zone_esc, fio=fio_esc, status=status_text)
     
     if status != "Чисто":
-        summary += LOCALIZATION[lang]['report_issues_header']
-        if boxes: summary += f"  - {LOCALIZATION[lang]['item_boxes']}\n"
-        if floor: summary += f"  - {LOCALIZATION[lang]['item_floor']}\n"
-        if mess:  summary += f"  - {LOCALIZATION[lang]['item_mess']}\n"
+        issues_items = []
+        if boxes: issues_items.append(LOCALIZATION[lang]['item_boxes'])
+        if floor: issues_items.append(LOCALIZATION[lang]['item_floor'])
+        if mess:  issues_items.append(LOCALIZATION[lang]['item_mess'])
+        summary += f"🔍 *Замечания:* {', '.join(issues_items)}\n"
         
     if comment:
         comment_esc = statistics.escape_markdown(comment)
@@ -675,6 +701,22 @@ async def process_comment(message: types.Message, state: FSMContext):
     if photos:
         summary += LOCALIZATION[lang]['report_photos_header'].format(count=len(photos))
         
+    # Send report notification to group asynchronously in background
+    asyncio.create_task(send_single_report_to_group(
+        bot=bot,
+        group_id=config.REPORT_GROUP_ID,
+        zone=zone,
+        status=status,
+        fio=user['fio'] if user else "Неизвестный",
+        username=user.get('username') if user else None,
+        boxes=boxes,
+        floor=floor,
+        mess=mess,
+        comment=comment,
+        photos=photos,
+        report_id=report_id
+    ))
+
     await state.set_state(CheckStates.main_menu)
     await message.answer(
         summary,
@@ -683,7 +725,226 @@ async def process_comment(message: types.Message, state: FSMContext):
     )
 
 
-# STATISTICS CALLBACK HANDLERS
+# GROUP REPORT HELPERS & HANDLERS
+async def send_single_report_to_group(bot: Bot, group_id: int, zone: str, status: str, fio: str, username: str, boxes: bool, floor: bool, mess: bool, comment: str, photos: list, report_id: int):
+    import html
+    fio_esc = html.escape(fio)
+    if username:
+        username_esc = html.escape(username)
+        fio_display = f"{fio_esc} (@{username_esc})"
+    else:
+        fio_display = fio_esc
+        
+    zone_esc = html.escape(zone)
+    status_text = "Чисто ✅" if status == 'Чисто' else "Есть замечания ⚠️"
+    now_str = datetime.now().strftime("%Y-%m-%d - %H:%M:%S")
+    
+    msg = f"📋 <b>НОВЫЙ ОТЧЕТ ПРОВЕРКИ ЗОНЫ #{report_id}</b>\n\n"
+    msg += f"📍 <b>Зона / Этаж:</b> {zone_esc}\n"
+    msg += f"📊 <b>Состояние:</b> {status_text}\n"
+    msg += f"👤 <b>Проверяющий:</b> {fio_display}\n"
+    msg += f"📅 <b>Дата проверки:</b> {now_str}\n"
+    
+    if status != "Чисто":
+        issues_items = []
+        if boxes: issues_items.append("Пустые коробки под стеллажом")
+        if floor: issues_items.append("Товары на полу")
+        if mess:  issues_items.append("Общий беспорядок")
+        msg += f"🔍 <b>Замечания:</b> {', '.join(issues_items)}\n"
+        
+    if comment:
+        comment_esc = html.escape(comment)
+        msg += f"\n💬 <b>Комментарий:</b> <i>{comment_esc}</i>\n"
+        
+    raw_id = abs(group_id)
+    target_chats = [int(f"-100{raw_id}"), int(f"-{raw_id}"), raw_id, group_id]
+    
+    for chat_id in target_chats:
+        try:
+            if photos:
+                from aiogram.types import InputMediaPhoto
+                media_group = []
+                for idx, item in enumerate(photos):
+                    file_id = item[1] if isinstance(item, tuple) else item
+                    if idx == 0:
+                        media_group.append(InputMediaPhoto(media=file_id, caption=msg, parse_mode="HTML"))
+                    else:
+                        media_group.append(InputMediaPhoto(media=file_id))
+                await bot.send_media_group(chat_id=chat_id, media=media_group)
+            else:
+                await bot.send_message(chat_id=chat_id, text=msg, parse_mode="HTML")
+            break
+        except Exception as e:
+            logger.error(f"Failed sending single report to group chat_id {chat_id}: {e}")
+
+
+async def send_consolidated_summary_to_group(bot: Bot, group_id: int, date_key: str = "today"):
+    import html
+    date_info = statistics.get_date_info(date_key, "ru")
+    reports = database.get_reports_for_summary(date_info['date_from'], date_info['date_to'])
+    
+    if not reports:
+        return False, "За выбранный период нет отчетов для отправки."
+        
+    clean_count = sum(1 for r in reports if r['status'] == 'Чисто')
+    issues_count = len(reports) - clean_count
+    
+    header = f"📊 <b>СВОДНЫЙ ОБЩИЙ ОТЧЕТ ПРОВЕРКИ ЗОН СКЛАДА</b>\n"
+    header += f"━━━━━━━━━━━━━━━━━━━━━━\n"
+    header += f"🗓 <b>Период:</b> {html.escape(date_info['title'])}\n"
+    header += f"📋 <b>Всего проверок:</b> {len(reports)}\n"
+    header += f"  ├ ✅ <b>Чисто:</b> {clean_count}\n"
+    header += f"  └ ⚠️ <b>С замечаниями:</b> {issues_count}\n"
+    header += f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    
+    entries = []
+    all_photos = []
+    
+    for idx, r in enumerate(reports, 1):
+        zone_esc = html.escape(r['zone'])
+        status_icon = "✅" if r['status'] == 'Чисто' else "⚠️"
+        inspector_esc = html.escape(r['inspector'])
+        if r['telegram_username']:
+            un_esc = html.escape(r['telegram_username'])
+            inspector_display = f"{inspector_esc} (@{un_esc})"
+        else:
+            inspector_display = inspector_esc
+            
+        entry = f"📍 <b>{idx}. {zone_esc}</b>\n"
+        entry += f"└ 👤 {inspector_display} | 📅 {r['created_at'][5:16]}\n"
+        entry += f"└ Состояние: <b>{html.escape(r['status'])}</b> {status_icon}\n"
+        
+        if r['status'] != 'Чисто':
+            issues = []
+            if r['has_empty_boxes']: issues.append("Пустые коробки")
+            if r['has_goods_on_floor']: issues.append("Товары на полу")
+            if r['has_mess']: issues.append("Беспорядок")
+            if issues:
+                entry += f"   └ 🔍 <b>Замечания:</b> <i>{', '.join(issues)}</i>\n"
+                
+        if r['comment']:
+            comm_esc = html.escape(r['comment'])
+            entry += f"   └ Комментарий: <i>{comm_esc}</i>\n"
+            
+        if r['photos']:
+            all_photos.extend(r['photos'])
+            
+        entry += "\n"
+        entries.append(entry)
+        
+    chunks = []
+    current_chunk = header
+    for entry in entries:
+        if len(current_chunk) + len(entry) > 3800:
+            chunks.append(current_chunk)
+            current_chunk = entry
+        else:
+            current_chunk += entry
+    if current_chunk:
+        chunks.append(current_chunk)
+        
+    raw_id = abs(group_id)
+    target_chats = [int(f"-100{raw_id}"), int(f"-{raw_id}"), raw_id, group_id]
+    
+    for chat_id in target_chats:
+        try:
+            for chunk in chunks:
+                await bot.send_message(chat_id=chat_id, text=chunk, parse_mode="HTML")
+                
+            if all_photos:
+                from aiogram.types import InputMediaPhoto
+                for i in range(0, len(all_photos), 10):
+                    p_chunk = all_photos[i:i+10]
+                    media = [InputMediaPhoto(media=pid) for pid in p_chunk]
+                    await bot.send_media_group(chat_id=chat_id, media=media)
+                    
+            return True, f"✅ Сводный отчет за {date_info['title']} с фото ({len(all_photos)} шт.) успешно отправлен в группу!"
+        except Exception as e:
+            logger.error(f"Failed sending summary to group chat_id {chat_id}: {e}")
+            
+    return False, "⚠️ Не удалось отправить сводный отчет в группу. Проверьте добавление бота в группу ID: 4908690020."
+
+
+@dp.callback_query(F.data.startswith("sdate:"))
+async def process_date_select(callback: types.CallbackQuery, state: FSMContext):
+    date_key = callback.data.split(":", 1)[1]
+    data = await state.get_data()
+    lang = data.get("lang") or database.get_user_lang(callback.from_user.id)
+    
+    date_info = statistics.get_date_info(date_key, lang)
+    stats_text = statistics.generate_text_stats(
+        lang=lang, 
+        date_from=date_info["date_from"], 
+        date_to=date_info["date_to"], 
+        date_title=date_info["title"]
+    )
+    
+    await callback.message.edit_text(
+        stats_text, 
+        parse_mode="Markdown", 
+        reply_markup=get_stats_actions_keyboard(lang, date_key)
+    )
+    
+    # Send photos associated with the selected date range
+    photos = database.get_photos_for_date_range(date_info["date_from"], date_info["date_to"])
+    if photos:
+        from aiogram.types import InputMediaPhoto
+        all_file_ids = [p["file_id"] for p in photos]
+        for i in range(0, len(all_file_ids), 10):
+            chunk = all_file_ids[i:i+10]
+            media_group = []
+            for idx, fid in enumerate(chunk):
+                if i == 0 and idx == 0:
+                    caption_txt = f"📸 Фотографии проверок за {date_info['title']} ({len(all_file_ids)} шт.)"
+                    media_group.append(InputMediaPhoto(media=fid, caption=caption_txt))
+                else:
+                    media_group.append(InputMediaPhoto(media=fid))
+            try:
+                await callback.message.answer_media_group(media=media_group)
+            except Exception as e:
+                logger.error(f"Error sending stats photos media group: {e}")
+
+    await callback.answer()
+
+
+
+@dp.callback_query(F.data == "sdate_select")
+async def process_back_to_date_select(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    lang = data.get("lang") or database.get_user_lang(callback.from_user.id)
+    await callback.message.edit_text(
+        LOCALIZATION[lang]['select_date_prompt'],
+        parse_mode="Markdown",
+        reply_markup=get_date_selection_keyboard(lang)
+    )
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("sexcel:"))
+async def process_excel_date_stats(callback: types.CallbackQuery, state: FSMContext):
+    date_key = callback.data.split(":", 1)[1]
+    data = await state.get_data()
+    lang = data.get("lang") or database.get_user_lang(callback.from_user.id)
+    
+    date_info = statistics.get_date_info(date_key, lang)
+    await callback.message.answer(LOCALIZATION[lang]['excel_loading'])
+    try:
+        excel_path = statistics.generate_excel_report(
+            date_from=date_info["date_from"], 
+            date_to=date_info["date_to"]
+        )
+        file = types.FSInputFile(excel_path)
+        caption_text = LOCALIZATION[lang]['excel_caption'].format(date=date_info["title"])
+        await callback.message.answer_document(
+            file,
+            caption=caption_text
+        )
+        if os.path.exists(excel_path):
+            os.remove(excel_path)
+    except Exception as e:
+        logger.error(f"Error sending Excel report: {e}")
+        await callback.message.answer(LOCALIZATION[lang]['excel_error'])
+    await callback.answer()
+
 @dp.callback_query(F.data == "stats:text")
 async def process_text_stats(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
@@ -714,11 +975,137 @@ async def process_excel_stats(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
 
 
-# MAIN RUNNER
+# FALLBACK HANDLER TO ALWAYS KEEP KEYBOARD UPDATED WITH 🏁 Завершить
+@dp.message(StateFilter("*"))
+async def fallback_any_message(message: types.Message, state: FSMContext):
+    user = database.get_user(message.from_user.id)
+    lang = user.get('lang', 'ru') if user else 'ru'
+    await state.set_state(CheckStates.main_menu)
+    await message.answer(
+        "📍 Выберите действие в меню:",
+        reply_markup=get_main_menu_keyboard(lang)
+    )
+
+
+# ==========================================
+# FLASK WEBHOOK SETUP FOR DEPLOYMENT (PaaS/PythonAnywhere)
+# ==========================================
+from flask import Flask, request, jsonify
+import asyncio
+
+app = Flask(__name__)
+
+# Initialize database on startup
+try:
+    database.init_db()
+except Exception as e:
+    logger.error(f"Error initializing database: {e}")
+
+@app.route("/", methods=["POST"])
+def webhook():
+    if request.headers.get("content-type") == "application/json":
+        try:
+            json_string = request.get_data().decode("utf-8")
+            update = types.Update.model_validate_json(json_string)
+            asyncio.run(dp.feed_webhook_update(bot, update))
+            return "OK", 200
+        except Exception as e:
+            logger.error(f"Webhook update processing failed: {e}")
+            return "Internal Server Error", 500
+    else:
+        return "Forbidden", 403
+
+@app.route("/set_webhook", methods=["GET"])
+def set_webhook_route():
+    host = request.headers.get("Host", "")
+    if not host:
+        return "Host header missing", 400
+    
+    webhook_url = f"https://{host}/"
+    
+    async def set_hook():
+        return await bot.set_webhook(webhook_url)
+    
+    try:
+        success = asyncio.run(set_hook())
+        if success:
+            return f"Webhook successfully set to: {webhook_url}", 200
+        else:
+            return "Telegram rejected webhook setting", 500
+    except Exception as e:
+        logger.error(f"Failed to set webhook: {e}")
+        return f"Error setting webhook: {e}", 500
+
+@app.route("/clear_webhook", methods=["GET"])
+def clear_webhook_route():
+    async def clear_hook():
+        return await bot.delete_webhook()
+    
+    try:
+        success = asyncio.run(clear_hook())
+        if success:
+            return "Webhook successfully cleared!", 200
+        else:
+            return "Telegram rejected webhook deletion", 500
+    except Exception as e:
+        logger.error(f"Failed to clear webhook: {e}")
+        return f"Error clearing webhook: {e}", 500
+
+
+# BACKGROUND 3-HOUR REMINDER SCHEDULER
+async def schedule_3_hour_reminders():
+    INTERVAL = 3 * 3600  # 3 hours = 10800 seconds
+    while True:
+        try:
+            await asyncio.sleep(INTERVAL)
+            
+            # Send notification to group
+            raw_id = abs(config.REPORT_GROUP_ID)
+            target_chats = [int(f"-100{raw_id}"), int(f"-{raw_id}"), raw_id, config.REPORT_GROUP_ID]
+            group_msg = (
+                "🔔 <b>ВНИМАНИЕ! ПРИШЛО ВРЕМЯ ОБХОДА СКЛАДА!</b>\n\n"
+                "📋 Прошло 3 часа. Пожалуйста, начните новую проверку зон склада в боте."
+            )
+            for chat_id in target_chats:
+                try:
+                    await bot.send_message(chat_id=chat_id, text=group_msg, parse_mode="HTML")
+                    break
+                except Exception as e:
+                    logger.error(f"Failed sending 3-hour reminder to group {chat_id}: {e}")
+
+            # Send notification to all registered users
+            users = database.get_all_users()
+            user_msg = (
+                "🔔 *Внимание! Пришло время обхода склада!*\n\n"
+                "🔒 Прошло 3 часа. Все зоны обновлены. Пожалуйста, нажмите *'📝 Новая проверка'*, чтобы провести новый обход зон склада."
+            )
+            for u in users:
+                user_id = u['user_id']
+                try:
+                    await bot.send_message(
+                        chat_id=user_id,
+                        text=user_msg,
+                        parse_mode="Markdown",
+                        reply_markup=get_main_menu_keyboard('ru')
+                    )
+                    await asyncio.sleep(0.05)
+                except Exception as e:
+                    logger.warning(f"Could not send 3-hour reminder to user {user_id}: {e}")
+
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"Error in schedule_3_hour_reminders loop: {e}")
+            await asyncio.sleep(60)
+
+
+# MAIN RUNNER FOR LOCAL POLLING
 async def main():
     database.init_db()
+    # Delete webhook to allow polling locally if it was set
+    await bot.delete_webhook(drop_pending_updates=True)
+    asyncio.create_task(schedule_3_hour_reminders())
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(main())

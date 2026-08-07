@@ -1,0 +1,11 @@
+services:
+  - type: worker
+    name: checklist-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot.py
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: REPORT_GROUP_ID
+        value: "-1003777301742"

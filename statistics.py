@@ -1,6 +1,6 @@
 import os
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import database
 
 def escape_markdown(text: str) -> str:
@@ -12,16 +12,84 @@ def escape_markdown(text: str) -> str:
         escaped = escaped.replace(char, f"\\{char}")
     return escaped
 
-def generate_text_stats(lang: str = "ru") -> str:
-    user_stats = database.get_stats_by_user()
-    recent_checks = database.get_recent_reports(10)
+def get_date_info(date_key: str, lang: str = "ru"):
+    now = datetime.now()
+    d0 = now.date()
+    d1 = d0 - timedelta(days=1)
+    d2 = d0 - timedelta(days=2)
+    d6 = d0 - timedelta(days=6)
     
+    if date_key.startswith("day:"):
+        date_str = date_key.split("day:")[1]
+        try:
+            target_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+            date_from = f"{target_date.strftime('%Y-%m-%d')} 00:00:00"
+            date_to = f"{target_date.strftime('%Y-%m-%d')} 23:59:59"
+            label = f"{target_date.strftime('%d.%m.%Y')}"
+            title = f"{target_date.strftime('%d.%m.%Y')}"
+            return {
+                "key": date_key,
+                "date_from": date_from,
+                "date_to": date_to,
+                "label": label,
+                "title": title
+            }
+        except Exception:
+            pass
+
+    if date_key == "yesterday":
+        date_from = f"{d1.strftime('%Y-%m-%d')} 00:00:00"
+        date_to = f"{d1.strftime('%Y-%m-%d')} 23:59:59"
+        label = f"Kecha ({d1.strftime('%d.%m')})" if lang == "uz" else f"Вчера ({d1.strftime('%d.%m')})"
+        title = f"{d1.strftime('%d.%m.%Y')}"
+    elif date_key == "day_before":
+        date_from = f"{d2.strftime('%Y-%m-%d')} 00:00:00"
+        date_to = f"{d2.strftime('%Y-%m-%d')} 23:59:59"
+        label = f"{d2.strftime('%d.%m')}"
+        title = f"{d2.strftime('%d.%m.%Y')}"
+    elif date_key == "3days":
+        date_from = f"{d2.strftime('%Y-%m-%d')} 00:00:00"
+        date_to = f"{d0.strftime('%Y-%m-%d')} 23:59:59"
+        label = f"Oxirgi 3 kun ({d2.strftime('%d.%m')}-{d0.strftime('%d.%m')})" if lang == "uz" else f"За последние 3 дня ({d2.strftime('%d.%m')}-{d0.strftime('%d.%m')})"
+        title = f"{d2.strftime('%d.%m.%Y')} - {d0.strftime('%d.%m.%Y')}"
+    elif date_key == "7days":
+        date_from = f"{d6.strftime('%Y-%m-%d')} 00:00:00"
+        date_to = f"{d0.strftime('%Y-%m-%d')} 23:59:59"
+        label = f"Oxirgi 7 kun ({d6.strftime('%d.%m')}-{d0.strftime('%d.%m')})" if lang == "uz" else f"За последние 7 дней ({d6.strftime('%d.%m')}-{d0.strftime('%d.%m')})"
+        title = f"{d6.strftime('%d.%m.%Y')} - {d0.strftime('%d.%m.%Y')}"
+    else:
+        date_key = "today"
+        date_from = f"{d0.strftime('%Y-%m-%d')} 00:00:00"
+        date_to = f"{d0.strftime('%Y-%m-%d')} 23:59:59"
+        label = f"Bugun ({d0.strftime('%d.%m')})" if lang == "uz" else f"Сегодня ({d0.strftime('%d.%m')})"
+        title = f"{d0.strftime('%d.%m.%Y')}"
+        
+    return {
+        "key": date_key,
+        "date_from": date_from,
+        "date_to": date_to,
+        "label": label,
+        "title": title
+    }
+
+def generate_text_stats(lang: str = "ru", date_from: str = None, date_to: str = None, date_title: str = None) -> str:
+    user_stats = database.get_stats_by_user(date_from, date_to)
+    recent_checks = database.get_recent_reports(10, date_from, date_to)
+    
+    date_header = f" ({date_title})" if date_title else ""
+    
+    if not recent_checks and not user_stats:
+        if lang == "uz":
+            return f"📊 *Tozalik tekshiruvlari statistikasi*{date_header}\n\n⚠️ *Tanlangan kunda obxod bo'lmadi.*"
+        else:
+            return f"📊 *Статистика проверок чистоты*{date_header}\n\n⚠️ *В выбранную дату обходов не было.*"
+
     if lang == "uz":
-        text = "📊 *Tozalik tekshiruvlari statistikasi*\n\n"
+        text = f"📊 *Tozalik tekshiruvlari statistikasi*{date_header}\n\n"
         
         text += "📋 *Oxirgi 10 ta tekshiruv logi:*\n"
         if not recent_checks:
-            text += "_Tekshiruvlar topilmadi_\n"
+            text += "_Tanlangan kunda obxod bo'lmadi_\n\n"
         else:
             for item in recent_checks:
                 time_formatted = item['created_at'][5:16] # e.g. "07-05 13:45"
@@ -60,11 +128,11 @@ def generate_text_stats(lang: str = "ru") -> str:
                 text += f"{idx}. {user_display}: *{total}* ta (kamchiliklar: {issues})\n"
                 
     else:
-        text = "📊 *Статистика проверок чистоты*\n\n"
+        text = f"📊 *Статистика проверок чистоты*{date_header}\n\n"
         
         text += "📋 *Журнал последних 10 проверок:*\n"
         if not recent_checks:
-            text += "_Проверки не найдены_\n"
+            text += "_В выбранную дату обходов не было_\n\n"
         else:
             for item in recent_checks:
                 time_formatted = item['created_at'][5:16] # e.g. "07-05 13:45"
@@ -105,10 +173,8 @@ def generate_text_stats(lang: str = "ru") -> str:
     return text
 
 
-
-
-def generate_excel_report() -> str:
-    rows, columns = database.get_all_reports_for_export()
+def generate_excel_report(date_from: str = None, date_to: str = None) -> str:
+    rows, columns = database.get_all_reports_for_export(date_from, date_to)
     
     # Create DataFrame
     df = pd.DataFrame(rows, columns=columns)

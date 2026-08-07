@@ -51,8 +51,21 @@ def test_database_and_stats():
     print(text_stats)
     print("-" * 40)
     
-    print("\nGenerating Excel report...")
-    excel_path = statistics.generate_excel_report()
+    print("\nTesting 3-day date info helper...")
+    info_today = statistics.get_date_info("today", "uz")
+    info_yesterday = statistics.get_date_info("yesterday", "uz")
+    info_day_before = statistics.get_date_info("day_before", "uz")
+    info_3days = statistics.get_date_info("3days", "uz")
+    print(f"Today info: {info_today}")
+    print(f"3-days info: {info_3days}")
+    assert info_3days["key"] == "3days"
+    
+    stats_3days = statistics.generate_text_stats(lang="uz", date_from=info_3days["date_from"], date_to=info_3days["date_to"], date_title=info_3days["title"])
+    assert "Tozalik tekshiruvlari statistikasi" in stats_3days
+    print(f"3-day statistics output:\n{stats_3days}")
+
+    print("\nGenerating Excel report for 3 days...")
+    excel_path = statistics.generate_excel_report(date_from=info_3days["date_from"], date_to=info_3days["date_to"])
     print(f"Excel report created at: {excel_path}")
     assert os.path.exists(excel_path), "Excel report file was not created!"
     

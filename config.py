@@ -13,6 +13,9 @@ DB_NAME = os.getenv("DB_NAME", "checklist_bot.db")
 # Directory to save uploaded photos
 PHOTOS_DIR = os.getenv("PHOTOS_DIR", "photos")
 
+# Target Telegram Group ID for reports
+REPORT_GROUP_ID = int(os.getenv("REPORT_GROUP_ID", "-1003777301742"))
+
 # Ensure photos directory exists
 if not os.path.exists(PHOTOS_DIR):
     os.makedirs(PHOTOS_DIR)
