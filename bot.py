@@ -756,8 +756,10 @@ async def send_single_report_to_group(bot: Bot, group_id: int, zone: str, status
         comment_esc = html.escape(comment)
         msg += f"\n💬 <b>Комментарий:</b> <i>{comment_esc}</i>\n"
         
-    raw_id = abs(group_id)
-    target_chats = [int(f"-100{raw_id}"), int(f"-{raw_id}"), raw_id, group_id]
+    target_chats = [group_id]
+    raw_str = str(abs(group_id))
+    if not str(group_id).startswith("-100"):
+        target_chats.extend([int(f"-100{raw_str}"), int(f"-{raw_str}"), abs(group_id)])
     
     for chat_id in target_chats:
         try:
@@ -1060,8 +1062,10 @@ async def schedule_3_hour_reminders():
             await asyncio.sleep(INTERVAL)
             
             # Send notification to group
-            raw_id = abs(config.REPORT_GROUP_ID)
-            target_chats = [int(f"-100{raw_id}"), int(f"-{raw_id}"), raw_id, config.REPORT_GROUP_ID]
+            target_chats = [config.REPORT_GROUP_ID]
+            raw_str = str(abs(config.REPORT_GROUP_ID))
+            if not str(config.REPORT_GROUP_ID).startswith("-100"):
+                target_chats.extend([int(f"-100{raw_str}"), int(f"-{raw_str}"), abs(config.REPORT_GROUP_ID)])
             group_msg = (
                 "🔔 <b>ВНИМАНИЕ! ПРИШЛО ВРЕМЯ ОБХОДА СКЛАДА!</b>\n\n"
                 "📋 Прошло 3 часа. Пожалуйста, начните новую проверку зон склада в боте."
