@@ -1582,25 +1582,6 @@ async def schedule_3_hour_reminders():
                 except Exception as e:
                     logger.error(f"Failed sending 3-hour reminder to group {chat_id}: {e}")
 
-            # Send notification to all registered users
-            users = database.get_all_users()
-            user_msg = (
-                "🔔 *Внимание! Пришло время обхода склада!*\n\n"
-                "🔒 Прошло 3 часа. Все зоны обновлены. Пожалуйста, нажмите *'📝 Новая проверка'*, чтобы провести новый обход зон склада."
-            )
-            for u in users:
-                user_id = u['user_id']
-                try:
-                    await bot.send_message(
-                        chat_id=user_id,
-                        text=user_msg,
-                        parse_mode="Markdown",
-                        reply_markup=get_main_menu_keyboard('ru')
-                    )
-                    await asyncio.sleep(0.05)
-                except Exception as e:
-                    logger.warning(f"Could not send 3-hour reminder to user {user_id}: {e}")
-
         except asyncio.CancelledError:
             break
         except Exception as e:
