@@ -128,76 +128,41 @@ def generate_text_stats(lang: str = "ru", date_from: str = None, date_to: str = 
                 text += f"   └ Коммент: _{comment_esc}_\n"
             text += "\n"
             
-    text += "👤 *ТОП сотрудников по проверкам:*\n"
-    if not user_stats:
-        text += "Нет данных\n"
-    else:
-        for idx, (fio, username, total, issues) in enumerate(user_stats[:5], 1):
-            fio_esc = escape_markdown(fio)
-            username_esc = escape_markdown(username)
-            user_display = f"{fio_esc} (@{username_esc})" if username else fio_esc
-            text += f"{idx}. {user_display}: *{total}* (с замечаниями: {issues})\n"
-            
-    # Add Department Statistics Breakdown
+    # Department Statistics Breakdown (First)
     otdel_stats = database.get_stats_by_otdel(date_from, date_to, all_time=all_time)
     if otdel_stats:
-        text += "\n🏢 *Статистика по отделам (по количеству обходов):*\n"
+        text += "🏢 *Статистика обходов по отделам:*\n"
         for idx, (otdel_name, total, issues, active_users) in enumerate(otdel_stats, 1):
+            medal = "🥇 " if idx == 1 else ("🥈 " if idx == 2 else ("🥉 " if idx == 3 else "▫️ "))
             otdel_esc = escape_markdown(otdel_name or "ОКЗ")
-            text += f"{idx}. *{otdel_esc}*: *{total}* проверок (⚠️ замечаний: {issues})\n"
+            text += f"{medal}*{otdel_esc}*: *{total}* обходов\n"
             
     return text
 
 
 def generate_3hour_summary_stats() -> str:
     """
-    Generates a concise 3-hour activity summary report showing which departments and staff are leading in inspections.
+    Generates a concise cumulative department checklist ranking for today.
     """
     now = datetime.now()
-    three_hours_ago = (now - timedelta(hours=3)).strftime("%Y-%m-%d %H:%M:%S")
-    
-    otdel_stats_3h = database.get_stats_by_otdel(date_from=three_hours_ago)
-    user_stats_3h = database.get_stats_by_user(date_from=three_hours_ago)
-    
-    # Also get full today stats for overall context
     today_start = now.strftime("%Y-%m-%d 00:00:00")
     otdel_stats_today = database.get_stats_by_otdel(date_from=today_start)
     
     time_header = f"{now.strftime('%H:%M')} ({now.strftime('%d.%m.%Y')})"
     
-    text = f"📊 <b>СВОДКА АКТИВНОСТИ ОБХОДОВ ЗА 3 ЧАСА</b> (на {time_header})\n\n"
+    text = f"📊 <b>СВОДКА ОБХОДОВ ПО ОТДЕЛАМ ЗА СЕГОДНЯ</b>\n"
+    text += f"🕒 <i>Время фиксации: {time_header}</i>\n\n"
     
-    # 1. Department Rankings for last 3 hours
-    text += "🏢 <b>Рейтинг отделов за последние 3 часа:</b>\n"
-    if not otdel_stats_3h:
-        text += "▫️ <i>За последние 3 часа проверок не зафиксировано</i>\n\n"
+    if not otdel_stats_today:
+        text += "▫️ <i>За сегодня обходов пока не зафиксировано</i>\n"
     else:
-        total_3h_checks = sum(row[1] for row in otdel_stats_3h)
-        for idx, (otdel_name, total, issues, active_users) in enumerate(otdel_stats_3h, 1):
-            medal = "🥇 " if idx == 1 else ("🥈 " if idx == 2 else ("🥉 " if idx == 3 else "▫️ "))
-            otdel_clean = otdel_name or "ОКЗ"
-            pct = int((total / total_3h_checks) * 100) if total_3h_checks > 0 else 0
-            text += f"{medal}<b>{otdel_clean}</b>: <b>{total}</b> обходов ({pct}%) | ⚠️ замечаний: {issues}\n"
-        text += "\n"
-        
-    # 2. Top Staff for last 3 hours
-    text += "👤 <b>ТОП сотрудников за последние 3 часа:</b>\n"
-    if not user_stats_3h:
-        text += "▫️ <i>Нет данных</i>\n\n"
-    else:
-        for idx, (fio, username, total, issues) in enumerate(user_stats_3h[:5], 1):
-            user_display = f"{fio} (@{username})" if username else fio
-            text += f"{idx}. <b>{user_display}</b> — <b>{total}</b> проверок (⚠️ {issues})\n"
-        text += "\n"
-        
-    # 3. Overall Today Department Total Standings
-    if otdel_stats_today:
-        text += "📈 <b>Общий итог по отделам за сегодня:</b>\n"
         total_today_checks = sum(row[1] for row in otdel_stats_today)
         for idx, (otdel_name, total, issues, active_users) in enumerate(otdel_stats_today, 1):
+            medal = "🥇 " if idx == 1 else ("🥈 " if idx == 2 else ("🥉 " if idx == 3 else "▫️ "))
             otdel_clean = otdel_name or "ОКЗ"
-            text += f"• <b>{otdel_clean}</b>: всего <b>{total}</b> проверок\n"
-        text += f"\n<i>Всего проверок сегодня: {total_today_checks}</i>\n"
+            text += f"{medal}<b>{otdel_clean}</b> — <b>{total}</b> обходов\n"
+            
+        text += f"\n📈 <b>Всего обходов за сегодня:</b> <b>{total_today_checks}</b>\n"
         
     return text
 
