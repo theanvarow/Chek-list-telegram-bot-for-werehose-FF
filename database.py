@@ -383,7 +383,19 @@ def get_stats_by_otdel(date_from: str = None, date_to: str = None, all_time: boo
     conn = get_connection()
     cursor = conn.cursor()
     
-    otdel_expr = "COALESCE(NULLIF(r.otdel, ''), NULLIF(u.otdel, ''), 'ОКЗ')"
+    # Normalize any sub-departments into main root departments (e.g. "ОТД Входящий поток" -> "ОТД", "ОТД Возвратный поток" -> "ОТД")
+    raw_otdel = "COALESCE(NULLIF(r.otdel, ''), NULLIF(u.otdel, ''), 'ОКЗ')"
+    otdel_expr = f"""
+        CASE 
+            WHEN {raw_otdel} LIKE 'ОТД%' THEN 'ОТД'
+            WHEN {raw_otdel} LIKE 'ОКЗ%' THEN 'ОКЗ'
+            WHEN {raw_otdel} LIKE 'РАО%' THEN 'РАО'
+            WHEN {raw_otdel} LIKE 'ГОВП%' THEN 'ГОВП'
+            WHEN {raw_otdel} LIKE 'СЕРВИС%' THEN 'СЕРВИС'
+            WHEN {raw_otdel} LIKE 'ЦПТ%' THEN 'ЦПТ'
+            ELSE {raw_otdel}
+        END
+    """
     
     if all_time:
         cursor.execute(f"""
