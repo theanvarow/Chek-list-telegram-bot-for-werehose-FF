@@ -1,7 +1,11 @@
+import sys
 import os
-import shutil
 import database
 import statistics
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 
 def test_database_and_stats():
     print("Initializing Database...")
@@ -18,7 +22,7 @@ def test_database_and_stats():
     assert user["username"] == "test_username", f"Username mismatch! Expected 'test_username', got '{user['username']}'"
     print(f"User retrieved successfully: {user}")
     
-    print("Saving test report with issues...")
+    print("Saving test report with issues and notified user...")
     photos = [("photos/test_photo1.jpg", "file_id_12345"), ("photos/test_photo2.jpg", "file_id_67890")]
     report_id = database.save_report(
         user_id=user_id,
@@ -28,10 +32,29 @@ def test_database_and_stats():
         has_goods_on_floor=False,
         has_mess=True,
         comment="Обнаружены пустые коробки под стеллажом и общий беспорядок",
-        photos=photos
+        photos=photos,
+        notified_user="Мастер Смены (@master_user)"
     )
     print(f"Report saved. Generated Report ID: {report_id}")
     
+    rep = database.get_report_by_id(report_id)
+    assert rep is not None, "Failed to retrieve report by ID!"
+    assert rep["notified_user"] == "Мастер Смены (@master_user)"
+    assert rep["is_fixed"] is False
+    
+    print("Testing marking report as fixed...")
+    database.mark_report_fixed(
+        report_id=report_id,
+        fixed_by="Иван Петров (@ivan_p)",
+        fix_photo_path="photos/fix_test.jpg",
+        fix_telegram_file_id="fix_file_999",
+        fix_comment="Все коробки убраны"
+    )
+    rep_fixed = database.get_report_by_id(report_id)
+    assert rep_fixed["is_fixed"] is True
+    assert rep_fixed["fixed_by"] == "Иван Петров (@ivan_p)"
+    print("Report marked as fixed successfully!")
+
     print("Saving test report without issues...")
     report_id2 = database.save_report(
         user_id=user_id,
@@ -52,16 +75,17 @@ def test_database_and_stats():
     print("-" * 40)
     
     print("\nTesting 3-day date info helper...")
-    info_today = statistics.get_date_info("today", "uz")
-    info_yesterday = statistics.get_date_info("yesterday", "uz")
-    info_day_before = statistics.get_date_info("day_before", "uz")
-    info_3days = statistics.get_date_info("3days", "uz")
+    info_today = statistics.get_date_info("today", "ru")
+    info_yesterday = statistics.get_date_info("yesterday", "ru")
+    info_day_before = statistics.get_date_info("day_before", "ru")
+    info_3days = statistics.get_date_info("3days", "ru")
     print(f"Today info: {info_today}")
     print(f"3-days info: {info_3days}")
     assert info_3days["key"] == "3days"
     
-    stats_3days = statistics.generate_text_stats(lang="uz", date_from=info_3days["date_from"], date_to=info_3days["date_to"], date_title=info_3days["title"])
-    assert "Tozalik tekshiruvlari statistikasi" in stats_3days
+    stats_3days = statistics.generate_text_stats(lang="ru", date_from=info_3days["date_from"], date_to=info_3days["date_to"], date_title=info_3days["title"])
+    assert "Статистика проверок чистоты" in stats_3days
+
     print(f"3-day statistics output:\n{stats_3days}")
 
     print("\nGenerating Excel report for 3 days...")
@@ -81,7 +105,8 @@ def test_database_and_stats():
     assert latest_report["photos"][0] == "file_id_12345"
     print(f"Latest report for zone retrieved successfully: {latest_report}")
     
-    print("\nAll database and statistics tests passed successfully! 🎉")
+    print("\nAll database, fix feature and statistics tests passed successfully! 🎉")
+
 
 
 if __name__ == "__main__":

@@ -19,6 +19,18 @@ def get_date_info(date_key: str, lang: str = "ru"):
     d2 = d0 - timedelta(days=2)
     d6 = d0 - timedelta(days=6)
     
+    if date_key in ["all", "all_time"]:
+        label = "📁 ВСЕ отчеты (В одном файле)"
+        title = "За всё время"
+        return {
+            "key": "all",
+            "date_from": None,
+            "date_to": None,
+            "all_time": True,
+            "label": label,
+            "title": title
+        }
+    
     if date_key.startswith("day:"):
         date_str = date_key.split("day:")[1]
         try:
@@ -40,7 +52,7 @@ def get_date_info(date_key: str, lang: str = "ru"):
     if date_key == "yesterday":
         date_from = f"{d1.strftime('%Y-%m-%d')} 00:00:00"
         date_to = f"{d1.strftime('%Y-%m-%d')} 23:59:59"
-        label = f"Kecha ({d1.strftime('%d.%m')})" if lang == "uz" else f"Вчера ({d1.strftime('%d.%m')})"
+        label = f"Вчера ({d1.strftime('%d.%m')})"
         title = f"{d1.strftime('%d.%m.%Y')}"
     elif date_key == "day_before":
         date_from = f"{d2.strftime('%Y-%m-%d')} 00:00:00"
@@ -50,18 +62,18 @@ def get_date_info(date_key: str, lang: str = "ru"):
     elif date_key == "3days":
         date_from = f"{d2.strftime('%Y-%m-%d')} 00:00:00"
         date_to = f"{d0.strftime('%Y-%m-%d')} 23:59:59"
-        label = f"Oxirgi 3 kun ({d2.strftime('%d.%m')}-{d0.strftime('%d.%m')})" if lang == "uz" else f"За последние 3 дня ({d2.strftime('%d.%m')}-{d0.strftime('%d.%m')})"
+        label = f"За последние 3 дня ({d2.strftime('%d.%m')}-{d0.strftime('%d.%m')})"
         title = f"{d2.strftime('%d.%m.%Y')} - {d0.strftime('%d.%m.%Y')}"
     elif date_key == "7days":
         date_from = f"{d6.strftime('%Y-%m-%d')} 00:00:00"
         date_to = f"{d0.strftime('%Y-%m-%d')} 23:59:59"
-        label = f"Oxirgi 7 kun ({d6.strftime('%d.%m')}-{d0.strftime('%d.%m')})" if lang == "uz" else f"За последние 7 дней ({d6.strftime('%d.%m')}-{d0.strftime('%d.%m')})"
+        label = f"За последние 7 дней ({d6.strftime('%d.%m')}-{d0.strftime('%d.%m')})"
         title = f"{d6.strftime('%d.%m.%Y')} - {d0.strftime('%d.%m.%Y')}"
     else:
         date_key = "today"
         date_from = f"{d0.strftime('%Y-%m-%d')} 00:00:00"
         date_to = f"{d0.strftime('%Y-%m-%d')} 23:59:59"
-        label = f"Bugun ({d0.strftime('%d.%m')})" if lang == "uz" else f"Сегодня ({d0.strftime('%d.%m')})"
+        label = f"Сегодня ({d0.strftime('%d.%m')})"
         title = f"{d0.strftime('%d.%m.%Y')}"
         
     return {
@@ -72,119 +84,76 @@ def get_date_info(date_key: str, lang: str = "ru"):
         "title": title
     }
 
-def generate_text_stats(lang: str = "ru", date_from: str = None, date_to: str = None, date_title: str = None) -> str:
-    user_stats = database.get_stats_by_user(date_from, date_to)
-    recent_checks = database.get_recent_reports(10, date_from, date_to)
+def generate_text_stats(lang: str = "ru", date_from: str = None, date_to: str = None, date_title: str = None, all_time: bool = False) -> str:
+    user_stats = database.get_stats_by_user(date_from, date_to, all_time=all_time)
+    recent_checks = database.get_recent_reports(10, date_from, date_to, all_time=all_time)
     
     date_header = f" ({date_title})" if date_title else ""
     
     if not recent_checks and not user_stats:
-        if lang == "uz":
-            return f"📊 *Tozalik tekshiruvlari statistikasi*{date_header}\n\n⚠️ *Tanlangan kunda obxod bo'lmadi.*"
-        else:
-            return f"📊 *Статистика проверок чистоты*{date_header}\n\n⚠️ *В выбранную дату обходов не было.*"
+        return f"📊 *Статистика проверок чистоты*{date_header}\n\n⚠️ *Нет данных об обходах.*"
 
-    if lang == "uz":
-        text = f"📊 *Tozalik tekshiruvlari statistikasi*{date_header}\n\n"
-        
-        text += "📋 *Oxirgi 10 ta tekshiruv logi:*\n"
-        if not recent_checks:
-            text += "_Tanlangan kunda obxod bo'lmadi_\n\n"
-        else:
-            for item in recent_checks:
-                time_formatted = item['created_at'][5:16] # e.g. "07-05 13:45"
-                inspector_esc = escape_markdown(item['inspector'])
-                username_esc = escape_markdown(item['telegram_username'])
-                user_display = f"{inspector_esc} (@{username_esc})" if item['telegram_username'] else inspector_esc
-                status_icon = "✅" if item['status'] == "Чисто" else "⚠️"
-                
-                zone_esc = escape_markdown(item['zone'])
-                text += f"📍 *{zone_esc}*\n"
-                text += f"└ 👤 {user_display} | 📅 {time_formatted}\n"
-                
-                status_lbl = "Toza" if item['status'] == "Чисто" else "Kamchiliklar bor"
-                text += f"└ Holat: *{status_lbl}* {status_icon}\n"
-                
-                if item['status'] != "Чисто":
-                    issues = []
-                    if item['has_empty_boxes']: issues.append("Bo'sh qutilar")
-                    if item['has_goods_on_floor']: issues.append("Polda tovarlar")
-                    if item['has_mess']: issues.append("Tartibsizlik")
-                    text += f"   └ Kamchiliklar: _{', '.join(issues)}_\n"
-                    
-                if item['comment']:
-                    comment_esc = escape_markdown(item['comment'])
-                    text += f"   └ Izoh: _{comment_esc}_\n"
-                text += "\n"
-                
-        text += "👤 *TOP xodimlar (tekshiruvlar soni):*\n"
-        if not user_stats:
-            text += "Ma'lumotlar yo'q\n"
-        else:
-            for idx, (fio, username, total, issues) in enumerate(user_stats[:5], 1):
-                fio_esc = escape_markdown(fio)
-                username_esc = escape_markdown(username)
-                user_display = f"{fio_esc} (@{username_esc})" if username else fio_esc
-                text += f"{idx}. {user_display}: *{total}* ta (kamchiliklar: {issues})\n"
-                
+    text = f"📊 *Статистика проверок чистоты*{date_header}\n\n"
+    text += "📋 *Журнал проверок:*\n"
+    if not recent_checks:
+        text += "_Нет данных об обходах_\n\n"
     else:
-        text = f"📊 *Статистика проверок чистоты*{date_header}\n\n"
-        
-        text += "📋 *Журнал последних 10 проверок:*\n"
-        if not recent_checks:
-            text += "_В выбранную дату обходов не было_\n\n"
-        else:
-            for item in recent_checks:
-                time_formatted = item['created_at'][5:16] # e.g. "07-05 13:45"
-                inspector_esc = escape_markdown(item['inspector'])
-                username_esc = escape_markdown(item['telegram_username'])
-                user_display = f"{inspector_esc} (@{username_esc})" if item['telegram_username'] else inspector_esc
-                status_icon = "✅" if item['status'] == "Чисто" else "⚠️"
-                
-                zone_esc = escape_markdown(item['zone'])
-                text += f"📍 *{zone_esc}*\n"
-                text += f"└ 👤 {user_display} | 📅 {time_formatted}\n"
-                
-                status_lbl = "Чисто" if item['status'] == "Чисто" else "Есть замечания"
-                text += f"└ Состояние: *{status_lbl}* {status_icon}\n"
-                
-                if item['status'] != "Чисто":
-                    issues = []
-                    if item['has_empty_boxes']: issues.append("Пустые коробки")
-                    if item['has_goods_on_floor']: issues.append("Товары на полу")
-                    if item['has_mess']: issues.append("Беспорядок")
+        for item in recent_checks:
+            time_formatted = item['created_at'][5:16] # e.g. "07-05 13:45"
+            inspector_esc = escape_markdown(item['inspector'])
+            username_esc = escape_markdown(item['telegram_username'])
+            user_display = f"{inspector_esc} (@{username_esc})" if item['telegram_username'] else inspector_esc
+            status_icon = "✅" if item['status'] == "Чисто" else "⚠️"
+            
+            zone_esc = escape_markdown(item['zone'])
+            text += f"📍 *{zone_esc}*\n"
+            text += f"└ 👤 {user_display} | 📅 {time_formatted}\n"
+            
+            status_lbl = "Чисто" if item['status'] == "Чисто" else "Есть замечания"
+            text += f"└ Состояние: *{status_lbl}* {status_icon}\n"
+            
+            if item['status'] != "Чисто":
+                issues = []
+                if item.get('has_empty_boxes'): issues.append("Пустые коробки")
+                if item.get('has_empty_pallets'): issues.append("Пустые поддоны")
+                if item.get('has_goods_on_floor'): issues.append("Товары на полу")
+                if item.get('has_damaged_goods'): issues.append("Брак товар")
+                if item.get('has_empty_bags'): issues.append("Пустой пакет")
+                if item.get('has_mess'): issues.append("Беспорядок")
+                if issues:
                     text += f"   └ Замечания: _{', '.join(issues)}_\n"
-                    
-                if item['comment']:
-                    comment_esc = escape_markdown(item['comment'])
-                    text += f"   └ Коммент: _{comment_esc}_\n"
-                text += "\n"
                 
-        text += "👤 *ТОП сотрудников по проверкам:*\n"
-        if not user_stats:
-            text += "Нет данных\n"
-        else:
-            for idx, (fio, username, total, issues) in enumerate(user_stats[:5], 1):
-                fio_esc = escape_markdown(fio)
-                username_esc = escape_markdown(username)
-                user_display = f"{fio_esc} (@{username_esc})" if username else fio_esc
-                text += f"{idx}. {user_display}: *{total}* (с замечаниями: {issues})\n"
-                
+            if item['comment']:
+                comment_esc = escape_markdown(item['comment'])
+                text += f"   └ Коммент: _{comment_esc}_\n"
+            text += "\n"
+            
+    text += "👤 *ТОП сотрудников по проверкам:*\n"
+    if not user_stats:
+        text += "Нет данных\n"
+    else:
+        for idx, (fio, username, total, issues) in enumerate(user_stats[:5], 1):
+            fio_esc = escape_markdown(fio)
+            username_esc = escape_markdown(username)
+            user_display = f"{fio_esc} (@{username_esc})" if username else fio_esc
+            text += f"{idx}. {user_display}: *{total}* (с замечаниями: {issues})\n"
+            
     return text
 
 
-def generate_excel_report(date_from: str = None, date_to: str = None) -> str:
-    rows, columns = database.get_all_reports_for_export(date_from, date_to)
+
+def generate_excel_report(date_from: str = None, date_to: str = None, all_time: bool = False) -> str:
+    rows, columns = database.get_all_reports_for_export(date_from, date_to, all_time=all_time)
     
     # Create DataFrame
     df = pd.DataFrame(rows, columns=columns)
     
     # Generate temporary file path
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filepath = f"checklist_report_{timestamp}.xlsx"
+    prefix = "all_reports" if all_time else "checklist_report"
+    filepath = f"{prefix}_{timestamp}.xlsx"
     
     # Save using pandas/openpyxl
-    # We can adjust column widths to make it beautiful
     with pd.ExcelWriter(filepath, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name="Отчеты по чистоте")
         
@@ -199,3 +168,4 @@ def generate_excel_report(date_from: str = None, date_to: str = None) -> str:
             worksheet.column_dimensions[col_letter].width = max(max_len + 3, 10)
             
     return filepath
+
