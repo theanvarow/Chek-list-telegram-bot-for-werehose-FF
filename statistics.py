@@ -156,14 +156,11 @@ def generate_3hour_summary_stats() -> str:
     if not otdel_stats_today:
         text += "▫️ <i>За сегодня обходов пока не зафиксировано</i>\n"
     else:
-        total_today_checks = sum(row[1] for row in otdel_stats_today)
         for idx, (otdel_name, total, issues, active_users) in enumerate(otdel_stats_today, 1):
             medal = "🥇 " if idx == 1 else ("🥈 " if idx == 2 else ("🥉 " if idx == 3 else "▫️ "))
             otdel_clean = otdel_name or "ОКЗ"
             text += f"{medal}<b>{otdel_clean}</b> — <b>{total}</b> обходов\n"
             
-        text += f"\n📈 <b>Всего обходов за сегодня:</b> <b>{total_today_checks}</b>\n"
-        
     return text
 
 
