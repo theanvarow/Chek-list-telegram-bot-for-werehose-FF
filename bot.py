@@ -1561,14 +1561,19 @@ async def schedule_3_hour_reminders():
         try:
             await asyncio.sleep(INTERVAL)
             
-            # Send notification to group
+            # Generate 3-hour statistics summary
+            summary_stats_html = statistics.generate_3hour_summary_stats()
+            
+            # Send notification and 3-hour leaderboard to group
             target_chats = [config.REPORT_GROUP_ID]
             raw_str = str(abs(config.REPORT_GROUP_ID))
             if not str(config.REPORT_GROUP_ID).startswith("-100"):
                 target_chats.extend([int(f"-100{raw_str}"), int(f"-{raw_str}"), abs(config.REPORT_GROUP_ID)])
+            
             group_msg = (
-                "🔔 <b>ВНИМАНИЕ! ПРИШЛО ВРЕМЯ ОБХОДА СКЛАДА!</b>\n\n"
-                "📋 Прошло 3 часа. Пожалуйста, начните новую проверку зон склада в боте."
+                "🔔 <b>ВНИМАНИЕ! ПРИШЛО ВРЕМЯ ОБХОДА СКЛАДА!</b>\n"
+                "📋 <i>Прошло 3 часа. Пожалуйста, начните новую проверку зон склада в боте.</i>\n\n"
+                f"{summary_stats_html}"
             )
             for chat_id in target_chats:
                 try:

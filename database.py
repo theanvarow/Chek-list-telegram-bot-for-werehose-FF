@@ -379,6 +379,58 @@ def get_stats_by_user(date_from: str = None, date_to: str = None, all_time: bool
     return rows
 
 
+def get_stats_by_otdel(date_from: str = None, date_to: str = None, all_time: bool = False):
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    otdel_expr = "COALESCE(NULLIF(r.otdel, ''), NULLIF(u.otdel, ''), 'ОКЗ')"
+    
+    if all_time:
+        cursor.execute(f"""
+            SELECT {otdel_expr} as otdel_name,
+                   COUNT(r.id) as total_checks,
+                   SUM(CASE WHEN r.status = 'Есть замечания' THEN 1 ELSE 0 END) as with_issues,
+                   COUNT(DISTINCT r.user_id) as active_users
+            FROM reports r
+            LEFT JOIN users u ON r.user_id = u.user_id
+            GROUP BY otdel_name
+            HAVING total_checks > 0
+            ORDER BY total_checks DESC
+        """)
+    elif date_from and date_to:
+        cursor.execute(f"""
+            SELECT {otdel_expr} as otdel_name,
+                   COUNT(r.id) as total_checks,
+                   SUM(CASE WHEN r.status = 'Есть замечания' THEN 1 ELSE 0 END) as with_issues,
+                   COUNT(DISTINCT r.user_id) as active_users
+            FROM reports r
+            LEFT JOIN users u ON r.user_id = u.user_id
+            WHERE r.created_at >= ? AND r.created_at <= ?
+            GROUP BY otdel_name
+            HAVING total_checks > 0
+            ORDER BY total_checks DESC
+        """, (date_from, date_to))
+    else:
+        if not date_from:
+            date_from = datetime.now().strftime("%Y-%m-%d") + " 00:00:00"
+        cursor.execute(f"""
+            SELECT {otdel_expr} as otdel_name,
+                   COUNT(r.id) as total_checks,
+                   SUM(CASE WHEN r.status = 'Есть замечания' THEN 1 ELSE 0 END) as with_issues,
+                   COUNT(DISTINCT r.user_id) as active_users
+            FROM reports r
+            LEFT JOIN users u ON r.user_id = u.user_id
+            WHERE r.created_at >= ?
+            GROUP BY otdel_name
+            HAVING total_checks > 0
+            ORDER BY total_checks DESC
+        """, (date_from,))
+        
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
 def get_stats_by_zone():
     conn = get_connection()
     cursor = conn.cursor()
